@@ -37,11 +37,12 @@ def build_ffmpeg_command(input_path: str, output_path: str, cfg: Config) -> list
         "-y",
         "-i", input_path,
         "-map", "0:v:0?",
-        "-map", "0:a:0?",
+        "-map", "0:a?",
         "-map", "0:s?",
+        "-map", "0:t?",
+        "-map_chapters", "0",
         "-max_muxing_queue_size", "1024",
     ]
-
     # Video
     cmd.extend(build_video_encoder_args(cfg))
 
@@ -50,6 +51,7 @@ def build_ffmpeg_command(input_path: str, output_path: str, cfg: Config) -> list
 
     # Subtitles: copy all
     cmd.extend(["-c:s", "copy"])
+    cmd.extend(["-c:t", "copy"])
 
     # Container
     cmd.append(output_path)
