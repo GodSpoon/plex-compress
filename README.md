@@ -60,7 +60,7 @@ python -m plex_compress /mnt/plex/TV \
 | `--state-db` | SQLite state DB path | `~/.plex_compress/state.db` |
 | `--dry-run` | Scan and report only | `False` |
 | `--exclude` | Directory names to skip | repeatable |
-
+| `--no-verify-checksum` | Skip checksum when copying over network mounts | `False` |
 ## NVIDIA RTX 2070 Super (Turing) Tuning
 
 The RTX 2070 Super has a dedicated **NVDEC/ NVENC** chip. Recommended settings:
