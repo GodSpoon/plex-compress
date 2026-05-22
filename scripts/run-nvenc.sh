@@ -4,7 +4,7 @@ set -euo pipefail
 # Plex Compress — NVENC batch transcode for Arch Linux + RTX 2070 Super
 # Edit PLEX_ROOT if your mount differs.
 
-PLEX_ROOT="${PLEX_ROOT:-/mnt/plex}"
+PLEX_ROOT="${PLEX_ROOT:-/mnt/truenas-media/Video}"
 ENCODER="${ENCODER:-hevc_nvenc}"
 QUALITY="${QUALITY:-28}"
 PRESET="${PRESET:-p4}"
@@ -32,8 +32,11 @@ if [[ "$BACKUP" == "1" ]]; then
   args+=(--backup)
 fi
 
+# Skip slow checksum verification when copying over network mounts
+args+=(--no-verify-checksum)
+
 if [[ -n "$LIMIT" ]]; then
   args+=(--limit "$LIMIT")
 fi
 
-python -m plex_compress "$PLEX_ROOT" "${args[@]}" "$@"
+python3 -m plex_compress "$PLEX_ROOT" "${args[@]}" "$@"
