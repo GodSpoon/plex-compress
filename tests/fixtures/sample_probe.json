@@ -1,0 +1,41 @@
+{
+  "streams": [
+    {
+      "index": 0,
+      "codec_name": "h264",
+      "codec_long_name": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+      "profile": "High",
+      "codec_type": "video",
+      "width": 1920,
+      "height": 1080,
+      "duration": "2700.000000",
+      "bit_rate": "2500000",
+      "disposition": {"default": 1}
+    },
+    {
+      "index": 1,
+      "codec_name": "ac3",
+      "codec_long_name": "ATSC A/52A (AC-3)",
+      "codec_type": "audio",
+      "channels": 6,
+      "channel_layout": "5.1(side)",
+      "bit_rate": "384000",
+      "duration": "2700.000000",
+      "disposition": {"default": 1}
+    },
+    {
+      "index": 2,
+      "codec_name": "ass",
+      "codec_long_name": "ASS (Advanced SSA) subtitle",
+      "codec_type": "subtitle",
+      "duration": "2700.000000",
+      "disposition": {"default": 1}
+    }
+  ],
+  "format": {
+    "filename": "sample.mkv",
+    "duration": "2700.000000",
+    "size": "1048576000",
+    "bit_rate": "3100000"
+  }
+}
