@@ -96,6 +96,17 @@ class SubtitleLossError(VerificationError):
     """Expected subtitle stream missing from output."""
 
 
+class AudioLossError(VerificationError):
+    """Expected audio stream missing from output."""
+
+
+class AttachmentLossError(VerificationError):
+    """Expected attachment stream missing from output."""
+
+
+class ChapterLossError(VerificationError):
+    """Expected chapter missing from output."""
+
 class ContainerError(VerificationError):
     """Output container format verification failed."""
 

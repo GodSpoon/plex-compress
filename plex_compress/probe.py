@@ -12,8 +12,9 @@ def probe_file(path: str) -> Dict[str, Any]:
     cmd = [
         "ffprobe",
         "-v", "error",
-        "-show_entries", "format:stream",
+        "-show_entries", "format:stream:chapter",
         "-show_format",
+        "-show_chapters",
         "-of", "json",
         path,
     ]
@@ -60,6 +61,16 @@ def get_default_audio_stream(probe: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 def get_subtitle_streams(probe: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Return all subtitle streams from probe data."""
     return [s for s in probe.get("streams", []) if s.get("codec_type") == "subtitle"]
+
+
+def get_attachment_streams(probe: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return all attachment streams from probe data."""
+    return [s for s in probe.get("streams", []) if s.get("codec_type") == "attachment"]
+
+
+def get_chapters(probe: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return all chapters from probe data."""
+    return probe.get("chapters", [])
 
 
 def get_duration(probe: Dict[str, Any]) -> Optional[float]:

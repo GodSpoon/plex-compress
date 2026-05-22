@@ -6,7 +6,10 @@ import subprocess
 from typing import Optional
 
 from .config import Config
-from .probe import probe_file, get_video_stream, get_audio_streams, get_subtitle_streams, get_duration, get_file_size
+from .probe import (
+    probe_file, get_video_stream, get_audio_streams, get_subtitle_streams,
+    get_duration, get_file_size, get_attachment_streams, get_chapters
+)
 from .audio import build_audio_encoder_args
 from .video import build_video_encoder_args
 from .state import StateDB
@@ -27,6 +30,9 @@ from . import (
     SubtitleLossError,
     ContainerError,
     MetadataError,
+    AudioLossError,
+    AttachmentLossError,
+    ChapterLossError,
 )
 
 
@@ -105,6 +111,29 @@ def verify_output(input_path: str, output_path: str, cfg: Config) -> None:
             f"Subtitle count dropped from {len(in_subs)} to {len(out_subs)}"
         )
 
+    # Check audio streams preserved
+    in_audio = get_audio_streams(in_probe)
+    out_audio = get_audio_streams(out_probe)
+    if len(in_audio) > len(out_audio):
+        raise AudioLossError(
+            f"Audio count dropped from {len(in_audio)} to {len(out_audio)}"
+        )
+
+    # Check attachments preserved
+    in_attach = get_attachment_streams(in_probe)
+    out_attach = get_attachment_streams(out_probe)
+    if len(in_attach) > len(out_attach):
+        raise AttachmentLossError(
+            f"Attachment count dropped from {len(in_attach)} to {len(out_attach)}"
+        )
+
+    # Check chapters preserved
+    in_chaps = get_chapters(in_probe)
+    out_chaps = get_chapters(out_probe)
+    if len(in_chaps) > len(out_chaps):
+        raise ChapterLossError(
+            f"Chapter count dropped from {len(in_chaps)} to {len(out_chaps)}"
+        )
 
 def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
     """Transcode a single file end-to-end.
