@@ -40,6 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--video-preset", default="medium", help="Encoder preset (default medium)")
     parser.add_argument("--parallel-jobs", type=int, default=1, help="Number of parallel transcodes (default 1)")
     parser.add_argument("--audio-bitrate", default="160k", help="Audio bitrate (default 160k)")
+    parser.add_argument("--exclude", action="append", default=[], help="Directory names to exclude")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
 
