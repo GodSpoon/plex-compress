@@ -214,7 +214,11 @@ header .subtitle {
   font-weight: 600;
   padding: 16px 18px 0;
 }
-.table-wrap { overflow-x: auto; }
+.table-wrap {
+  overflow-x: auto;
+  max-height: 420px;
+  overflow-y: auto;
+}
 table {
   width: 100%;
   border-collapse: collapse;
@@ -234,14 +238,19 @@ th {
   background: var(--bg3);
 }
 tr:last-child td { border-bottom: none; }
-td { color: var(--fg); }
+td {
+  color: var(--fg);
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 td.size { font-family: monospace; color: var(--fg2); }
 td.saved { color: var(--accent); font-weight: 600; }
 td.status { font-weight: 600; }
 td.status.completed { color: var(--accent); }
 td.status.failed { color: var(--err); }
 td.status.in_progress { color: var(--info); }
-
 /* Shows breakdown */
 .shows-grid {
   display: grid;
@@ -469,14 +478,20 @@ function render(data) {
   // Failed table
   const failedBody = document.getElementById("failedTable");
   failedBody.innerHTML = "";
-  if (data.failed.length === 0) {
+  const failedToShow = data.failed.slice(0, 10);
+  if (failedToShow.length === 0) {
     failedBody.innerHTML = '<tr><td colspan="2" style="color:var(--fg2)">No failures — all good!</td></tr>';
   }
-  data.failed.forEach(f => {
+  failedToShow.forEach(f => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td title="${f.path}">${basename(f.path)}</td><td style="color:var(--err);font-size:0.8rem">${f.reason || ""}</td>`;
+    tr.innerHTML = `<td title="${f.path}">${basename(f.path)}</td><td title="${f.reason || ""}" style="color:var(--err);font-size:0.8rem">${(f.reason || "").substring(0, 80)}</td>`;
     failedBody.appendChild(tr);
   });
+  if (data.failed.length > 10) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="2" style="color:var(--fg2);font-size:0.8rem">+ ${data.failed.length - 10} more failed files</td>`;
+    failedBody.appendChild(tr);
+  }
 
   // Shows grid
   const showsGrid = document.getElementById("showsGrid");
