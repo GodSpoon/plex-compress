@@ -31,10 +31,17 @@ class StateDB:
         self.db_path = db_path
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self._init_db()
+        self.reset_in_progress()
 
     def _init_db(self):
         with sqlite3.connect(self.db_path) as conn:
             conn.executescript(SCHEMA)
+            conn.commit()
+
+    def reset_in_progress(self):
+        """Reset any in-progress entries to pending (useful after a crash)."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("UPDATE files SET status='pending' WHERE status='in_progress'")
             conn.commit()
 
     def _now(self) -> str:

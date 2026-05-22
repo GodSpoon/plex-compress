@@ -47,7 +47,8 @@ def build_ffmpeg_command(input_path: str, output_path: str, cfg: Config) -> list
         "-map", "0:s?",
         "-map", "0:t?",
         "-map_chapters", "0",
-        "-max_muxing_queue_size", "1024",
+        "-map_metadata", "0",
+        "-max_muxing_queue_size", "9999",
     ]
     # Video
     cmd.extend(build_video_encoder_args(cfg))
@@ -135,6 +136,7 @@ def verify_output(input_path: str, output_path: str, cfg: Config) -> None:
             f"Chapter count dropped from {len(in_chaps)} to {len(out_chaps)}"
         )
 
+
 def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
     """Transcode a single file end-to-end.
 
@@ -144,19 +146,28 @@ def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
         logger.info(f"[DRY-RUN] Would transcode: {path}")
         return True
 
-    # Check temp space
-    free_gb = get_free_space_gb(cfg.temp_dir)
     file_size = os.path.getsize(path)
-    state.mark_started(path, file_size)
-    # Need at least 2x file size in temp (source copy + output)
-    needed_gb = (file_size * 3) / (1024 ** 3)
+
+    # Check temp space (source copy + temp output before move)
+    free_gb = get_free_space_gb(cfg.temp_dir)
+    needed_gb = (file_size * 2) / (1024 ** 3)
     if free_gb < needed_gb:
-        raise TempSpaceError(
+        logger.error(
             f"Only {free_gb:.1f} GB free in temp dir, need ~{needed_gb:.1f} GB for {path}"
         )
+        return False
+
+    state.mark_started(path, file_size)
 
     temp_input = make_temp_path(cfg.temp_dir, suffix=os.path.splitext(path)[1])
-    temp_output = make_temp_path(cfg.temp_dir, suffix="." + cfg.output_container)
+    ffmpeg_log = temp_input + ".ffmpeg.log"
+
+    if cfg.output_dir:
+        temp_output = make_temp_path(cfg.temp_dir, suffix="." + cfg.output_container)
+    else:
+        # For in-place replacement, write temp output next to the target
+        # so we can use os.replace() for an atomic swap on the same filesystem.
+        temp_output = path + ".plex_compress_tmp"
 
     try:
         # Copy source to local temp
@@ -166,14 +177,17 @@ def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
         else:
             shutil.copy2(path, temp_input)
 
-
         # Build and run ffmpeg
         cmd = build_ffmpeg_command(temp_input, temp_output, cfg)
-        logger.info(f"Transcoding: {' '.join(cmd)}")
-        try:
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
-        except subprocess.CalledProcessError as e:
-            raise FfmpegError(f"ffmpeg failed: {e.stderr}")
+        logger.info(f"Transcoding: ffmpeg {' '.join(cmd[:12])} ...")
+        with open(ffmpeg_log, "w") as stderr_fh:
+            try:
+                subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=stderr_fh)
+            except subprocess.CalledProcessError:
+                stderr_fh.flush()
+                with open(ffmpeg_log, "r") as f:
+                    stderr_text = f.read()
+                raise FfmpegError(f"ffmpeg failed: {stderr_text[:4000]}")
 
         # Verify output
         if cfg.verify_output:
@@ -198,19 +212,24 @@ def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             safe_move(temp_output, output_path)
             state.mark_completed(path, out_size)
-            logger.info(f"Done: {path} -> {output_path} ({in_size / 1024 / 1024:.1f} MB -> {out_size / 1024 / 1024:.1f} MB)")
+            logger.info(
+                f"Done: {path} -> {output_path} "
+                f"({in_size / 1024 / 1024:.1f} MB -> {out_size / 1024 / 1024:.1f} MB)"
+            )
         else:
             # In-place atomic replacement
             backup_path = path + cfg.backup_suffix
             if cfg.keep_backup:
+                if os.path.exists(backup_path):
+                    os.remove(backup_path)
+                os.replace(path, backup_path)
                 logger.info(f"Keeping backup at {backup_path}")
-                safe_move(path, backup_path)
-            else:
-                os.remove(path)
 
-            safe_move(temp_output, path)
+            os.replace(temp_output, path)
             state.mark_completed(path, out_size)
-            logger.info(f"Done: {path} ({in_size / 1024 / 1024:.1f} MB -> {out_size / 1024 / 1024:.1f} MB)")
+            logger.info(
+                f"Done: {path} ({in_size / 1024 / 1024:.1f} MB -> {out_size / 1024 / 1024:.1f} MB)"
+            )
         return True
 
     except Exception as e:
@@ -220,7 +239,7 @@ def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
 
     finally:
         # Cleanup temp files
-        for p in (temp_input, temp_output):
+        for p in (temp_input, temp_output, ffmpeg_log):
             try:
                 if os.path.exists(p):
                     os.remove(p)

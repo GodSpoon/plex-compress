@@ -93,7 +93,7 @@ def main(argv: Optional[list] = None) -> int:
         if not os.path.isfile(cfg.single_file):
             logger.error(f"File not found: {cfg.single_file}")
             return 1
-        ok, reason = is_candidate(cfg.single_file, cfg)
+        ok, reason, _probe = is_candidate(cfg.single_file, cfg)
         if not ok:
             logger.info(f"Skipping single file: {cfg.single_file} ({reason})")
             return 0
@@ -110,7 +110,7 @@ def main(argv: Optional[list] = None) -> int:
             logger.error(f"Library path required and must be a directory: {cfg.library_path}")
             return 1
         logger.info(f"Scanning library: {cfg.library_path}")
-        report = scan_library(cfg)
+        report = scan_library(cfg, state=state, force=cfg.force)
 
     # Apply include-pattern filter
     candidates = report["candidates"]

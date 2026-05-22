@@ -39,7 +39,7 @@ def test_is_candidate_too_small():
         open(path, "w").close()
         cfg = Config(min_file_size_mb=10)
         # Since ffprobe fails on empty file, it returns probe_error
-        ok, reason = is_candidate(path, cfg)
+        ok, reason, _probe = is_candidate(path, cfg)
         assert ok is False
 
 
@@ -58,6 +58,6 @@ def test_is_candidate_already_optimal_video(monkeypatch):
     monkeypatch.setattr("plex_compress.scanner.probe_file", mock_probe)
 
     cfg = Config()
-    ok, reason = is_candidate("/fake/path.mkv", cfg)
+    ok, reason, _probe = is_candidate("/fake/path.mkv", cfg)
     assert ok is False
     assert "already_optimal" in reason
