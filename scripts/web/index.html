@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plex Compress Dashboard</title>
+<style>
+:root {
+  --bg: #0f1115;
+  --bg2: #181b21;
+  --bg3: #1e222a;
+  --fg: #e2e4e9;
+  --fg2: #9aa0ac;
+  --accent: #4ade80;
+  --accent2: #22c55e;
+  --warn: #fbbf24;
+  --err: #f87171;
+  --info: #60a5fa;
+  --border: #2a2f3a;
+  --radius: 12px;
+  --shadow: 0 4px 20px rgba(0,0,0,0.35);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+.container { max-width: 1200px; margin: 0 auto; padding: 16px; }
+
+/* Header */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+header h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+header h1 .dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: inline-block;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+header .subtitle {
+  color: var(--fg2);
+  font-size: 0.85rem;
+  margin-top: 2px;
+}
+.status-pill {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+}
+.status-pill.running { color: var(--accent); border-color: rgba(74,222,128,0.3); }
+.status-pill.idle { color: var(--fg2); }
+.status-pill.error { color: var(--err); border-color: rgba(248,113,113,0.3); }
+
+/* Stats Grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.stat-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow);
+  transition: transform 0.15s;
+}
+.stat-card:hover { transform: translateY(-2px); }
+.stat-card .label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg2);
+  margin-bottom: 6px;
+}
+.stat-card .value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--fg);
+}
+.stat-card .value.saved { color: var(--accent); }
+.stat-card .value.failed { color: var(--err); }
+.stat-card .value.warn { color: var(--warn); }
+.stat-card .sub {
+  font-size: 0.8rem;
+  color: var(--fg2);
+  margin-top: 4px;
+}
+
+/* Progress Section */
+.progress-section {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow);
+}
+.progress-section h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--fg);
+}
+.progress-bar-wrap {
+  background: var(--bg);
+  border-radius: 999px;
+  height: 28px;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid var(--border);
+}
+.progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent2), var(--accent));
+  transition: width 0.6s ease;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 10px;
+  min-width: 40px;
+}
+.progress-bar span {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #064e3b;
+  white-space: nowrap;
+}
+.progress-legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  font-size: 0.8rem;
+  color: var(--fg2);
+}
+.progress-legend span { display: flex; align-items: center; gap: 6px; }
+.legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.legend-dot.completed { background: var(--accent); }
+.legend-dot.failed { background: var(--err); }
+.legend-dot.pending { background: var(--fg2); }
+
+/* Current Activity */
+.current-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow);
+}
+.current-card h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.current-card .current-file {
+  font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+  font-size: 0.85rem;
+  background: var(--bg);
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  color: var(--info);
+  word-break: break-all;
+}
+.current-card .current-show {
+  font-size: 0.9rem;
+  color: var(--fg2);
+  margin-top: 6px;
+}
+
+/* Tables */
+.table-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow);
+}
+.table-card h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 16px 18px 0;
+}
+.table-wrap { overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+th, td {
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+th {
+  color: var(--fg2);
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--bg3);
+}
+tr:last-child td { border-bottom: none; }
+td { color: var(--fg); }
+td.size { font-family: monospace; color: var(--fg2); }
+td.saved { color: var(--accent); font-weight: 600; }
+td.status { font-weight: 600; }
+td.status.completed { color: var(--accent); }
+td.status.failed { color: var(--err); }
+td.status.in_progress { color: var(--info); }
+
+/* Shows breakdown */
+.shows-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.show-item {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+}
+.show-item .show-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.show-item .show-meta {
+  font-size: 0.8rem;
+  color: var(--fg2);
+}
+.show-item .show-bar-wrap {
+  margin-top: 8px;
+  background: var(--bg);
+  border-radius: 999px;
+  height: 6px;
+  overflow: hidden;
+}
+.show-item .show-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+
+/* Footer */
+footer {
+  text-align: center;
+  color: var(--fg2);
+  font-size: 0.8rem;
+  padding: 20px 0 10px;
+}
+
+/* Mobile */
+@media (max-width: 600px) {
+  header h1 { font-size: 1.2rem; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .stat-card .value { font-size: 1.3rem; }
+  th, td { padding: 8px 10px; font-size: 0.8rem; }
+  .shows-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <div>
+    <h1><span class="dot" id="statusDot"></span> Plex Compress</h1>
+    <div class="subtitle" id="subtitle">Loading...</div>
+  </div>
+  <div class="status-pill running" id="statusPill">Running</div>
+</header>
+
+<div class="stats-grid" id="statsGrid">
+  <div class="stat-card"><div class="label">Completed</div><div class="value" id="statCompleted">—</div></div>
+  <div class="stat-card"><div class="label">Failed</div><div class="value failed" id="statFailed">—</div></div>
+  <div class="stat-card"><div class="label">In Progress</div><div class="value warn" id="statInProgress">—</div></div>
+  <div class="stat-card"><div class="label">Space Saved</div><div class="value saved" id="statSaved">—</div><div class="sub" id="statSavedSub"></div></div>
+</div>
+
+<div class="progress-section">
+  <h2>Overall Progress</h2>
+  <div class="progress-bar-wrap">
+    <div class="progress-bar" id="progressBar" style="width:0%"><span id="progressText">0%</span></div>
+  </div>
+  <div class="progress-legend">
+    <span><span class="legend-dot completed"></span> <span id="legendCompleted">0 done</span></span>
+    <span><span class="legend-dot failed"></span> <span id="legendFailed">0 failed</span></span>
+    <span><span class="legend-dot pending"></span> <span id="legendPending">0 pending</span></span>
+  </div>
+</div>
+
+<div class="current-card" id="currentCard">
+  <h2>Current Activity</h2>
+  <div class="current-file" id="currentFile">Checking...</div>
+  <div class="current-show" id="currentShow"></div>
+</div>
+
+<div class="table-card">
+  <h2>Recent Transcodes</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>File</th><th>Status</th><th>Original</th><th>Output</th><th>Saved</th></tr></thead>
+      <tbody id="recentTable"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="table-card">
+  <h2>Failed Files</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>File</th><th>Reason</th></tr></thead>
+      <tbody id="failedTable"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="table-card">
+  <h2>Shows Breakdown</h2>
+  <div class="shows-grid" id="showsGrid"></div>
+</div>
+
+<footer>
+  Auto-refreshes every 5s &middot; <span id="lastUpdated">—</span>
+</footer>
+
+</div>
+
+<script>
+function formatBytes(bytes) {
+  if (bytes === 0 || bytes == null) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+}
+function formatBytesDiff(bytes) {
+  const gb = bytes / (1024 ** 3);
+  const mb = bytes / (1024 ** 2);
+  if (gb >= 1) return gb.toFixed(2) + " GB";
+  if (mb >= 1) return mb.toFixed(0) + " MB";
+  return bytes + " B";
+}
+function basename(path) {
+  return path.split("/").pop();
+}
+function showName(path) {
+  const parts = path.split("/");
+  const idx = parts.findIndex(p => p.includes("{tmdb-") || p.includes("{tvdb-"));
+  return idx >= 0 ? parts[idx] : parts[parts.length - 2] || basename(path);
+}
+
+async function fetchData() {
+  try {
+    const res = await fetch("/api/status");
+    const data = await res.json();
+    render(data);
+  } catch (e) {
+    document.getElementById("subtitle").textContent = "Cannot reach API — " + e.message;
+    document.getElementById("statusPill").textContent = "Error";
+    document.getElementById("statusPill").className = "status-pill error";
+    document.getElementById("statusDot").style.background = "var(--err)";
+    document.getElementById("statusDot").style.animation = "none";
+  }
+}
+
+function render(data) {
+  const stats = data.stats;
+  const total = stats.total;
+  const completed = stats.completed;
+  const failed = stats.failed;
+  const pending = total - completed - failed - stats.in_progress;
+  const saved = stats.saved_bytes;
+
+  document.getElementById("statCompleted").textContent = completed;
+  document.getElementById("statFailed").textContent = failed;
+  document.getElementById("statInProgress").textContent = stats.in_progress;
+  document.getElementById("statSaved").textContent = formatBytesDiff(saved);
+  document.getElementById("statSavedSub").textContent = (total > 0 ? ((completed / total) * 100).toFixed(1) : 0) + "% of library processed";
+
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+  document.getElementById("progressBar").style.width = pct + "%";
+  document.getElementById("progressText").textContent = pct + "%";
+  document.getElementById("legendCompleted").textContent = completed + " done";
+  document.getElementById("legendFailed").textContent = failed + " failed";
+  document.getElementById("legendPending").textContent = (pending + stats.in_progress) + " remaining";
+
+  const running = data.currently_running;
+  if (running) {
+    document.getElementById("currentFile").textContent = basename(running.path);
+    document.getElementById("currentShow").textContent = showName(running.path);
+    document.getElementById("statusPill").textContent = "Running";
+    document.getElementById("statusPill").className = "status-pill running";
+    document.getElementById("statusDot").style.background = "var(--accent)";
+    document.getElementById("statusDot").style.animation = "pulse 2s infinite";
+  } else if (completed === 0 && total === 0) {
+    document.getElementById("currentFile").textContent = "Waiting for first scan...";
+    document.getElementById("currentShow").textContent = "";
+    document.getElementById("statusPill").textContent = "Idle";
+    document.getElementById("statusPill").className = "status-pill idle";
+    document.getElementById("statusDot").style.background = "var(--fg2)";
+    document.getElementById("statusDot").style.animation = "none";
+  } else {
+    document.getElementById("currentFile").textContent = "Idle — waiting for next file";
+    document.getElementById("currentShow").textContent = "";
+    document.getElementById("statusPill").textContent = "Idle";
+    document.getElementById("statusPill").className = "status-pill idle";
+    document.getElementById("statusDot").style.background = "var(--fg2)";
+    document.getElementById("statusDot").style.animation = "none";
+  }
+
+  // Recent table
+  const recentBody = document.getElementById("recentTable");
+  recentBody.innerHTML = "";
+  data.recent.forEach(f => {
+    const tr = document.createElement("tr");
+    const orig = f.original_size || 0;
+    const out = f.output_size || 0;
+    const savedAmt = orig - out;
+    tr.innerHTML = `
+      <td title="${f.path}">${basename(f.path)}</td>
+      <td class="status ${f.status}">${f.status}</td>
+      <td class="size">${formatBytes(orig)}</td>
+      <td class="size">${formatBytes(out)}</td>
+      <td class="saved">${savedAmt > 0 ? "-" + formatBytes(savedAmt) : "—"}</td>
+    `;
+    recentBody.appendChild(tr);
+  });
+
+  // Failed table
+  const failedBody = document.getElementById("failedTable");
+  failedBody.innerHTML = "";
+  if (data.failed.length === 0) {
+    failedBody.innerHTML = '<tr><td colspan="2" style="color:var(--fg2)">No failures — all good!</td></tr>';
+  }
+  data.failed.forEach(f => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td title="${f.path}">${basename(f.path)}</td><td style="color:var(--err);font-size:0.8rem">${f.reason || ""}</td>`;
+    failedBody.appendChild(tr);
+  });
+
+  // Shows grid
+  const showsGrid = document.getElementById("showsGrid");
+  showsGrid.innerHTML = "";
+  data.shows.forEach(s => {
+    const div = document.createElement("div");
+    div.className = "show-item";
+    const pct = s.total > 0 ? Math.round((s.completed / s.total) * 100) : 0;
+    div.innerHTML = `
+      <div class="show-name" title="${s.name}">${s.name}</div>
+      <div class="show-meta">${s.completed}/${s.total} done &middot; ${formatBytesDiff(s.saved)} saved</div>
+      <div class="show-bar-wrap"><div class="show-bar" style="width:${pct}%"></div></div>
+    `;
+    showsGrid.appendChild(div);
+  });
+
+  document.getElementById("subtitle").textContent = `${total} files tracked across ${data.shows.length} shows`;
+  document.getElementById("lastUpdated").textContent = new Date().toLocaleTimeString();
+}
+
+fetchData();
+setInterval(fetchData, 5000);
+</script>
+</body>
+</html>
