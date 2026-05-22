@@ -130,7 +130,11 @@ def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
     try:
         # Copy source to local temp
         logger.info(f"Copying {path} to temp...")
-        copy_with_verify(path, temp_input)
+        if cfg.verify_checksum:
+            copy_with_verify(path, temp_input)
+        else:
+            shutil.copy2(path, temp_input)
+
 
         # Build and run ffmpeg
         cmd = build_ffmpeg_command(temp_input, temp_output, cfg)

@@ -34,6 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--state-db", default=None, help="Path to state SQLite DB")
     parser.add_argument("--log", default=None, help="Path to log file")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
+    parser.add_argument("--no-verify-checksum", action="store_true", help="Skip checksum verification when copying files to temp")
     parser.add_argument("--reset-failed", action="store_true", help="Reset failed entries and retry")
     parser.add_argument("--video-quality", type=int, default=28, help="Video quality (CRF/CQ 0-51 for x265/NVENC, 0-100 for VideoToolbox; default 28)")
     parser.add_argument("--video-encoder", default="libx265", choices=["libx265", "hevc_videotoolbox", "hevc_nvenc"], help="Video encoder (default libx265)")
@@ -65,6 +66,7 @@ def main(argv: Optional[list] = None) -> int:
         video_encoder=args.video_encoder,
         video_preset=args.video_preset,
         parallel_jobs=args.parallel_jobs,
+        verify_checksum=not args.no_verify_checksum,
         audio_bitrate=args.audio_bitrate,
         exclusions=args.exclude,
     )
