@@ -40,3 +40,10 @@ if [[ -n "$LIMIT" ]]; then
 fi
 
 python3 -m plex_compress "$PLEX_ROOT" "${args[@]}" "$@"
+
+# Examples of additional flags you can pass:
+#   --include-pattern "S01*"          # Only transcode Season 1
+#   --file "/path/to/one/file.mkv"    # Transcode a single test file
+#   --output-dir /mnt/plex-compressed # Write to a new dir, leave originals
+#   --force                           # Re-process already-completed files
+#   --exclude "Specials" "Extras"     # Skip these directories

@@ -1,12 +1,14 @@
 """Command-line interface for plex_compress."""
 
 import argparse
+import fnmatch
+import os
 import signal
 import sys
 from typing import Optional
 
 from .config import Config
-from .scanner import scan_library
+from .scanner import scan_library, is_candidate
 from .transcoder import transcode_file
 from .state import StateDB
 from .utils import setup_logging
@@ -26,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Transcode Plex library to space-efficient HEVC with stereo audio."
     )
-    parser.add_argument("library_path", help="Root path of the library to scan/transcode")
+    parser.add_argument("library_path", nargs="?", default="", help="Root path of the library to scan/transcode (optional when --file is used)")
     parser.add_argument("--dry-run", action="store_true", help="Scan only, do not transcode")
     parser.add_argument("--backup", action="store_true", help="Keep original files as .backup")
     parser.add_argument("--limit", type=int, default=None, help="Max files to process")
@@ -42,6 +44,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--parallel-jobs", type=int, default=1, help="Number of parallel transcodes (default 1)")
     parser.add_argument("--audio-bitrate", default="160k", help="Audio bitrate (default 160k)")
     parser.add_argument("--exclude", action="append", default=[], help="Directory names to exclude")
+    parser.add_argument("--file", "-f", default=None, help="Process a single file instead of scanning a library")
+    parser.add_argument("--include-pattern", default=None, help="Glob pattern to filter scanned files (e.g. '*.mkv', 'S01*')")
+    parser.add_argument("--output-dir", "-o", default=None, help="Write outputs to this directory instead of replacing originals in-place")
+    parser.add_argument("--force", action="store_true", help="Re-process files already marked as completed in state DB")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
 
@@ -68,6 +74,10 @@ def main(argv: Optional[list] = None) -> int:
         parallel_jobs=args.parallel_jobs,
         verify_checksum=not args.no_verify_checksum,
         audio_bitrate=args.audio_bitrate,
+        output_dir=args.output_dir,
+        single_file=args.file,
+        include_pattern=args.include_pattern,
+        force=args.force,
         exclusions=args.exclude,
     )
 
@@ -78,25 +88,51 @@ def main(argv: Optional[list] = None) -> int:
         state.reset_failed()
         logger.info("Reset failed entries.")
 
-    logger.info(f"Scanning library: {cfg.library_path}")
-    report = scan_library(cfg)
+    # Single-file mode bypasses scanning
+    if cfg.single_file:
+        if not os.path.isfile(cfg.single_file):
+            logger.error(f"File not found: {cfg.single_file}")
+            return 1
+        ok, reason = is_candidate(cfg.single_file, cfg)
+        if not ok:
+            logger.info(f"Skipping single file: {cfg.single_file} ({reason})")
+            return 0
+        report = {
+            "total_files": 1,
+            "candidates": [cfg.single_file],
+            "skipped": [],
+            "already_optimal": 0,
+            "estimated_savings_gb": 0.0,
+        }
+        logger.info(f"Single file mode: {cfg.single_file}")
+    else:
+        if not cfg.library_path or not os.path.isdir(cfg.library_path):
+            logger.error(f"Library path required and must be a directory: {cfg.library_path}")
+            return 1
+        logger.info(f"Scanning library: {cfg.library_path}")
+        report = scan_library(cfg)
+
+    # Apply include-pattern filter
+    candidates = report["candidates"]
+    if cfg.include_pattern:
+        candidates = [p for p in candidates if fnmatch.fnmatch(os.path.basename(p), cfg.include_pattern)]
+        logger.info(f"After pattern filter '{cfg.include_pattern}': {len(candidates)} files")
 
     logger.info(f"Total files: {report['total_files']}")
-    logger.info(f"Candidates: {len(report['candidates'])}")
+    logger.info(f"Candidates: {len(candidates)}")
     logger.info(f"Already optimal: {report['already_optimal']}")
     logger.info(f"Skipped: {len(report['skipped'])}")
     logger.info(f"Estimated savings: {report['estimated_savings_gb']:.1f} GB")
 
     if cfg.dry_run:
         # Print first 20 candidates
-        for p in report["candidates"][:20]:
+        for p in candidates[:20]:
             logger.info(f"  [CANDIDATE] {p}")
         for p, reason in report["skipped"][:20]:
             logger.info(f"  [SKIPPED] {p}: {reason}")
         return 0
 
     # Process candidates
-    candidates = report["candidates"]
     if cfg.limit:
         candidates = candidates[:cfg.limit]
 
@@ -110,7 +146,7 @@ def main(argv: Optional[list] = None) -> int:
             break
 
         existing_status = state.get_status(path)
-        if existing_status == "completed":
+        if existing_status == "completed" and not cfg.force:
             logger.info(f"Skipping already completed: {path}")
             skipped += 1
             continue

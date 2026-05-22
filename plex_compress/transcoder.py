@@ -157,17 +157,29 @@ def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
                 f"Output size ({out_size}) > 110% of input ({in_size}), skipping replacement"
             )
 
-        # Atomic replacement
-        backup_path = path + cfg.backup_suffix
-        if cfg.keep_backup:
-            logger.info(f"Keeping backup at {backup_path}")
-            safe_move(path, backup_path)
+        if cfg.output_dir:
+            # Output-dir mode: preserve relative structure under output_dir
+            if cfg.library_path and path.startswith(cfg.library_path):
+                rel = os.path.relpath(path, cfg.library_path)
+            else:
+                rel = os.path.basename(path)
+            output_path = os.path.join(cfg.output_dir, rel)
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            safe_move(temp_output, output_path)
+            state.mark_completed(path, out_size)
+            logger.info(f"Done: {path} -> {output_path} ({in_size / 1024 / 1024:.1f} MB -> {out_size / 1024 / 1024:.1f} MB)")
         else:
-            os.remove(path)
+            # In-place atomic replacement
+            backup_path = path + cfg.backup_suffix
+            if cfg.keep_backup:
+                logger.info(f"Keeping backup at {backup_path}")
+                safe_move(path, backup_path)
+            else:
+                os.remove(path)
 
-        safe_move(temp_output, path)
-        state.mark_completed(path, out_size)
-        logger.info(f"Done: {path} ({in_size / 1024 / 1024:.1f} MB -> {out_size / 1024 / 1024:.1f} MB)")
+            safe_move(temp_output, path)
+            state.mark_completed(path, out_size)
+            logger.info(f"Done: {path} ({in_size / 1024 / 1024:.1f} MB -> {out_size / 1024 / 1024:.1f} MB)")
         return True
 
     except Exception as e:

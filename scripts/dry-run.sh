@@ -24,3 +24,13 @@ python3 -m plex_compress "$PLEX_ROOT" \
   --dry-run \
   --verbose \
   "$@"
+
+# Examples of additional flags you can pass:
+#   --include-pattern "S01*"          # Only Season 1 episodes
+#   --exclude "Specials"              # Skip Specials directories
+#   --limit 20                        # Only estimate first 20 candidates
+#   --file "/path/to/one/file.mkv"    # Dry-run a single file
+#   --output-dir /tmp/test-output     # Preview output structure
+#   --force                           # Include already-completed files
+#   --no-verify-checksum              # Skip slow network checksums
+#   --parallel-jobs 2                 # Simulate 2 concurrent jobs

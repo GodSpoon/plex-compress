@@ -54,6 +54,18 @@ class Config:
     dry_run: bool = False
     verbose: bool = False
 
+    # Output mode: if set, write to this dir instead of in-place replacement
+    output_dir: Optional[str] = None
+
+    # Single-file mode
+    single_file: Optional[str] = None
+
+    # Pattern filter for scanned files (fnmatch glob)
+    include_pattern: Optional[str] = None
+
+    # Force re-process already-completed files
+    force: bool = False
+
     # Limits
     limit: Optional[int] = None  # Max files to process
     exclusions: List[str] = field(default_factory=list)
@@ -67,5 +79,10 @@ class Config:
         if self.library_path:
             self.library_path = os.path.abspath(self.library_path)
         self.temp_dir = os.path.abspath(self.temp_dir)
+        if self.output_dir:
+            self.output_dir = os.path.abspath(self.output_dir)
+            os.makedirs(self.output_dir, exist_ok=True)
+        if self.single_file:
+            self.single_file = os.path.abspath(self.single_file)
         os.makedirs(self.temp_dir, exist_ok=True)
         os.makedirs(os.path.dirname(self.state_db_path), exist_ok=True)
