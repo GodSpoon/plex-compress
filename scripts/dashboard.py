@@ -110,6 +110,24 @@ def _db_query(db_path: str):
         key=lambda x: -x["saved"]
     )
 
+    # Session stats (since most recent session start)
+    c.execute("SELECT started_at FROM sessions ORDER BY id DESC LIMIT 1")
+    session_row = c.fetchone()
+    session_start = session_row[0] if session_row else None
+    session_stats = {"files": 0, "original_size": 0, "output_size": 0, "saved_bytes": 0}
+    if session_start:
+        c.execute(
+            "SELECT COUNT(*), SUM(original_size), SUM(output_size) FROM files WHERE status='completed' AND started_at >= ?",
+            (session_start,)
+        )
+        srow = c.fetchone()
+        session_stats = {
+            "files": srow[0] or 0,
+            "original_size": srow[1] or 0,
+            "output_size": srow[2] or 0,
+            "saved_bytes": (srow[1] or 0) - (srow[2] or 0),
+        }
+
     conn.close()
     return {
         "stats": {
@@ -124,6 +142,7 @@ def _db_query(db_path: str):
         "failed": failed_rows,
         "shows": shows,
         "currently_running": currently_running,
+        "session": session_stats,
     }
 
 

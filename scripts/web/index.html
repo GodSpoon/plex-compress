@@ -325,6 +325,19 @@ footer {
   <div class="stat-card"><div class="label">Space Saved</div><div class="value saved" id="statSaved">—</div><div class="sub" id="statSavedSub"></div></div>
 </div>
 
+<div class="stats-grid" id="sessionGrid" style="margin-bottom:12px">
+  <div class="stat-card" style="border-color:rgba(96,165,250,0.3)">
+    <div class="label" style="color:var(--info)">This Session</div>
+    <div class="value" id="statSessionFiles">—</div>
+    <div class="sub" id="statSessionSub"></div>
+  </div>
+  <div class="stat-card" style="border-color:rgba(96,165,250,0.3)">
+    <div class="label" style="color:var(--info)">Session Saved</div>
+    <div class="value saved" id="statSessionSaved">—</div>
+    <div class="sub" id="statSessionSavedSub"></div>
+  </div>
+</div>
+
 <div class="progress-section">
   <h2>Overall Progress</h2>
   <div class="progress-bar-wrap">
@@ -426,6 +439,15 @@ function render(data) {
   document.getElementById("statSaved").textContent = formatBytesDiff(saved);
   document.getElementById("statSavedSub").textContent = (total > 0 ? ((completed / total) * 100).toFixed(1) : 0) + "% of library processed";
 
+  // Session stats
+  const sess = data.session || {files: 0, saved_bytes: 0, original_size: 0};
+  document.getElementById("statSessionFiles").textContent = sess.files;
+  const sessSaved = sess.saved_bytes || 0;
+  const sessOrig = sess.original_size || 1;
+  const sessPct = sessOrig > 0 ? Math.round((sessSaved / sessOrig) * 100) : 0;
+  document.getElementById("statSessionSaved").textContent = formatBytesDiff(sessSaved);
+  document.getElementById("statSessionSavedSub").textContent = sessPct + "% compression this session";
+  document.getElementById("statSessionSub").textContent = "files since last batch start";
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
   document.getElementById("progressBar").style.width = pct + "%";
   document.getElementById("progressText").textContent = pct + "%";

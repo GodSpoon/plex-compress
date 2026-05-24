@@ -40,6 +40,18 @@ TOTAL_SHOWS=$(echo "$SORTED" | wc -l)
 echo "Found $TOTAL_SHOWS shows. Processing largest first."
 echo ""
 
+# Start a new session in the state DB
+python3 -c "
+import sys
+sys.path.insert(0, '.')
+from plex_compress.state import StateDB
+import os
+db = os.path.expanduser('${STATE_DB}')
+s = StateDB(db)
+sid = s.start_session(name='run-by-size')
+print(f'Started session {sid}')
+"
+
 idx=0
 while IFS= read -r line; do
     size=${line%% *}

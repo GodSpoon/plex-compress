@@ -187,7 +187,7 @@ def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
                 stderr_fh.flush()
                 with open(ffmpeg_log, "r") as f:
                     stderr_text = f.read()
-                raise FfmpegError(f"ffmpeg failed: {stderr_text[:4000]}")
+                raise FfmpegError(f"ffmpeg failed: {stderr_text[-4000:]}")
 
         # Verify output
         if cfg.verify_output:

@@ -23,6 +23,13 @@ CREATE TABLE IF NOT EXISTS files (
 
 CREATE INDEX IF NOT EXISTS idx_status ON files(status);
 CREATE INDEX IF NOT EXISTS idx_path ON files(path);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00',
+    ended_at TEXT,
+    name TEXT
+);
 """
 
 
@@ -46,6 +53,60 @@ class StateDB:
 
     def _now(self) -> str:
         return datetime.utcnow().isoformat()
+
+    def start_session(self, name: str = "") -> int:
+        """Record a new batch session start. Returns session id."""
+        with sqlite3.connect(self.db_path) as conn:
+            c = conn.execute(
+                "INSERT INTO sessions (started_at, name) VALUES (?, ?)",
+                (self._now(), name)
+            )
+            conn.commit()
+            return c.lastrowid
+
+    def end_session(self, session_id: int):
+        """Mark a session as ended."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE sessions SET ended_at=? WHERE id=?",
+                (self._now(), session_id)
+            )
+            conn.commit()
+
+    def get_current_session_start(self) -> Optional[str]:
+        """Return the started_at of the most recent session."""
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT started_at FROM sessions ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            return row[0] if row else None
+
+    def get_session_stats(self) -> Dict[str, Any]:
+        """Return stats for the current session (since most recent session start)."""
+        session_start = self.get_current_session_start()
+        if not session_start:
+            return {
+                "files": 0,
+                "original_size": 0,
+                "output_size": 0,
+                "saved_bytes": 0,
+            }
+        with sqlite3.connect(self.db_path) as conn:
+            c = conn.cursor()
+            c.execute(
+                """SELECT COUNT(*), SUM(original_size), SUM(output_size)
+                   FROM files WHERE status='completed' AND started_at >= ?""",
+                (session_start,)
+            )
+            count, orig, out = c.fetchone()
+            orig = orig or 0
+            out = out or 0
+            return {
+                "files": count or 0,
+                "original_size": orig,
+                "output_size": out,
+                "saved_bytes": orig - out,
+            }
 
     def upsert(self, path: str, status: str, original_size: Optional[int] = None,
                output_size: Optional[int] = None, reason: Optional[str] = None):
@@ -134,4 +195,13 @@ class StateDB:
     def reset_failed(self):
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("UPDATE files SET status='pending', reason=NULL WHERE status='failed'")
+            conn.commit()
+
+    def reset_failed_for_show(self, show_pattern: str):
+        """Reset failed entries matching a show path pattern."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE files SET status='pending', reason=NULL WHERE status='failed' AND path LIKE ?",
+                (f"%{show_pattern}%",)
+            )
             conn.commit()
