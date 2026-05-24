@@ -161,13 +161,16 @@ def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
 
     temp_input = make_temp_path(cfg.temp_dir, suffix=os.path.splitext(path)[1])
     ffmpeg_log = temp_input + ".ffmpeg.log"
-
-    if cfg.output_dir:
-        temp_output = make_temp_path(cfg.temp_dir, suffix="." + cfg.output_container)
-    else:
-        # For in-place replacement, write temp output next to the target
-        # so we can use os.replace() for an atomic swap on the same filesystem.
-        temp_output = path + ".plex_compress_tmp"
+    # Always write ffmpeg output locally with the correct container extension;
+    # ffmpeg uses the extension to determine the output format muxer.
+    temp_output = make_temp_path(cfg.temp_dir, suffix="." + cfg.output_container)
+    # Cleanup orphaned temp from a previous crashed in-place run
+    final_tmp = path + ".plex_compress_tmp"
+    if os.path.exists(final_tmp):
+        try:
+            os.remove(final_tmp)
+        except OSError:
+            pass
 
     try:
         # Copy source to local temp
@@ -201,6 +204,10 @@ def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
             raise SafetyError(
                 f"Output size ({out_size}) > 110% of input ({in_size}), skipping replacement"
             )
+        if out_size > in_size * 0.95:
+            raise SafetyError(
+                f"Output size ({out_size}) > 95% of input ({in_size}), not worth the transcode"
+            )
 
         if cfg.output_dir:
             # Output-dir mode: preserve relative structure under output_dir
@@ -217,15 +224,17 @@ def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
                 f"({in_size / 1024 / 1024:.1f} MB -> {out_size / 1024 / 1024:.1f} MB)"
             )
         else:
-            # In-place atomic replacement
+            # In-place replacement
+            # Copy to a temp file next to the target (same filesystem) so we
+            # can atomically replace the original with os.replace().
+            shutil.copy2(temp_output, final_tmp)
             backup_path = path + cfg.backup_suffix
             if cfg.keep_backup:
                 if os.path.exists(backup_path):
                     os.remove(backup_path)
                 os.replace(path, backup_path)
                 logger.info(f"Keeping backup at {backup_path}")
-
-            os.replace(temp_output, path)
+            os.replace(final_tmp, path)
             state.mark_completed(path, out_size)
             logger.info(
                 f"Done: {path} ({in_size / 1024 / 1024:.1f} MB -> {out_size / 1024 / 1024:.1f} MB)"
@@ -239,7 +248,7 @@ def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
 
     finally:
         # Cleanup temp files
-        for p in (temp_input, temp_output, ffmpeg_log):
+        for p in (temp_input, temp_output, ffmpeg_log, final_tmp):
             try:
                 if os.path.exists(p):
                     os.remove(p)
