@@ -3,8 +3,8 @@
 Transcode Plex libraries to space-efficient HEVC (H.265) with stereo-normalized audio.
 
 - **Video:** HEVC via `libx265` (CPU), `hevc_videotoolbox` (Apple Silicon), or **`hevc_nvenc`** (NVIDIA RTX 20-series+)
-- **Audio:** AAC-LC stereo @ 160 kbps with EBU R128 loudnorm (`I=-16 LUFS`)
-- **Container:** MKV (subtitle preservation)
+- **Audio:** Default track -> AAC-LC stereo @ 160 kbps with EBU R128 loudnorm (`I=-16 LUFS`). All other audio tracks copied as-is.
+- **Container:** MKV (subtitle/attachment/chapter preservation)
 
 ## Why
 
@@ -36,6 +36,9 @@ nvidia-smi
 git clone https://github.com/GodSpoon/plex-compress.git
 cd plex-compress
 
+# Health check (recommended before any batch run)
+python3 -m plex_compress --health-check --video-encoder hevc_nvenc
+
 # Dry-run scan to see what would be processed
 python3 -m plex_compress /mnt/plex/TV --dry-run --video-encoder hevc_nvenc
 
@@ -53,6 +56,13 @@ python3 -m plex_compress /mnt/plex/TV \
   --parallel-jobs 2 \
   --backup \
   --limit 10
+
+# Autonomous watch mode (processes new files as they appear)
+python3 -m plex_compress /mnt/plex/TV \
+  --watch \
+  --watch-interval 300 \
+  --video-encoder hevc_nvenc \
+  --backup
 ```
 
 ## CLI Options
@@ -88,6 +98,17 @@ python3 -m plex_compress /mnt/plex/TV \
 | `--force` | — | Re-process files already marked completed in state DB | `False` |
 | `--no-verify-checksum` | — | Skip SHA-256 checksum when copying over network mounts | `False` |
 | `--reset-failed` | — | Reset failed entries in state DB and retry them | `False` |
+| `--min-file-age` | — | Skip files modified within last N seconds | `300` |
+| `--no-file-locking` | — | Allow concurrent processing of same file (not recommended) | `False` |
+| `--no-post-replace-verify` | — | Skip post-replace verification of final file | `False` |
+
+### Autonomous Operation
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--watch` | Monitor library for new files and auto-process | `False` |
+| `--watch-interval` | Polling interval in seconds for watch mode | `60` |
+| `--health-check` | Run pre-flight validation and exit | `False` |
 
 ### Persistence
 
@@ -98,6 +119,14 @@ python3 -m plex_compress /mnt/plex/TV \
 | `--verbose` / `-v` | Enable debug logging | `False` |
 
 ## Usage Examples
+
+### Health Check (Pre-Flight)
+
+```bash
+python3 -m plex_compress --health-check --video-encoder hevc_nvenc --verbose
+```
+
+Validates ffmpeg, ffprobe, hardware encoder, temp space, state DB, and audio filter chain before any destructive work.
 
 ### Scan and Estimate Savings
 
@@ -165,6 +194,19 @@ python3 -m plex_compress /mnt/plex/TV \
 
 If interrupted (Ctrl-C), re-run the same command and it resumes where it left off using the state database.
 
+### Autonomous Watch Mode
+
+```bash
+python3 -m plex_compress /mnt/plex/TV \
+  --watch \
+  --watch-interval 300 \
+  --video-encoder hevc_nvenc \
+  --backup \
+  --log ~/.plex_compress/watch.log
+```
+
+Runs indefinitely, polling the library every 5 minutes for new files and auto-processing them. Safe to run as a systemd service or tmux session.
+
 ## NVIDIA RTX 2070 Super (Turing) Tuning
 
 The RTX 2070 Super has a dedicated **NVDEC/NVENC** chip. Recommended settings:
@@ -189,25 +231,62 @@ python3 -m plex_compress /mnt/plex \
    //nas/plex /mnt/plex cifs credentials=/etc/.smbcred,uid=sam,gid=sam 0 0
    ```
 
-2. **Dry-run to estimate savings:**
+2. **Health check before any batch:**
+   ```bash
+   python3 -m plex_compress --health-check --video-encoder hevc_nvenc
+   ```
+
+3. **Dry-run to estimate savings:**
    ```bash
    ./scripts/dry-run.sh
    ```
 
-3. **Batch transcode overnight:**
+4. **Batch transcode overnight:**
    ```bash
    ./scripts/run-nvenc.sh
    ```
 
 Logs and state DB are written to `~/.plex_compress/` so you can resume after reboot or interrupt.
 
-## Safety
+## Safety Architecture
 
-- **Atomic replacement**: original is either kept as `.backup` or removed only after successful verification.
-- **Verification pass**: every output is re-probed for codec, duration (+/-2 s), channel layout, and subtitle preservation.
-- **Size guard**: if output is > 110% of input, the transcode is rejected.
-- **Resume**: SQLite state DB tracks every file; re-run resumes where it left off.
-- **Non-destructive mode**: use `--output-dir` to write to a separate directory, leaving originals untouched.
+### Data Loss Prevention
+
+- **Atomic replacement**: temp file written to same filesystem, then `os.replace()` atomically swaps. No partial writes possible.
+- **Backup mode**: `--backup` keeps original as `.plex_compress_backup`. Post-replace verification can rollback if the new file is corrupt.
+- **Post-replace verification**: after atomic swap, the final file is re-probed to confirm it's valid. If not, and a backup exists, automatic rollback occurs.
+- **File locking**: prevents multiple processes from transcoding the same file simultaneously.
+- **File age guard**: skips files modified within the last 5 minutes, avoiding race conditions with downloaders (Sonarr/Radarr) still writing the file.
+
+### Quality Verification
+
+Every output is verified before the original is replaced:
+
+- **Video codec**: must be HEVC (not H.264 passthrough)
+- **Duration**: output within ±2 seconds of input (with auto-retry on transient GPU failures)
+- **Audio streams**: no audio tracks dropped
+- **Audio layout**: default track must be stereo (no >2 channel surround leaking through)
+- **Subtitle streams**: no subtitle tracks dropped
+- **Attachments**: no font/image attachments dropped
+- **Chapters**: all chapters preserved
+- **Size guard**: rejects if output > 110% of input (catches egregious bloat)
+- **Efficiency guard**: rejects if output > 95% of input (skips already-efficient sources)
+
+### Stream Preservation
+
+- **Default audio track**: downmixed to stereo + EBU R128 loudnorm (`-16 LUFS`, `-1.5 dBTP`, `11 LRA`)
+- **Other audio tracks**: copied as-is (commentary, alternate languages, descriptive audio all preserved)
+- **Subtitles**: copied without re-encoding
+- **Attachments**: copied (fonts, cover images)
+- **Chapters**: preserved with `-map_chapters 0`
+- **Metadata**: preserved with `-map_metadata 0` (titles, language tags, disposition flags)
+
+### Resume and Concurrency
+
+- **SQLite state DB**: tracks every file's status (`pending`/`in_progress`/`completed`/`failed`/`skipped`)
+- **WAL mode**: SQLite Write-Ahead Logging + 5-second busy timeout for safe concurrent access
+- **Stale job reset**: auto-resets `in_progress` entries to `pending` on startup (crash recovery)
+- **Retry logic**: files failing with duration mismatch are retried once before being marked failed
 
 ## Tests
 
