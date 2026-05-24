@@ -41,9 +41,10 @@ echo "Found $TOTAL_SHOWS shows. Processing largest first."
 echo ""
 
 # Start a new session in the state DB
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 python3 -c "
 import sys
-sys.path.insert(0, '.')
+sys.path.insert(0, '${SCRIPT_DIR}/..')
 from plex_compress.state import StateDB
 import os
 db = os.path.expanduser('${STATE_DB}')
