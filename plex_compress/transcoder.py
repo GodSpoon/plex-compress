@@ -137,42 +137,17 @@ def verify_output(input_path: str, output_path: str, cfg: Config) -> None:
         )
 
 
-def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
-    """Transcode a single file end-to-end.
 
-    Returns True on success, False on failure.
-    """
-    if cfg.dry_run:
-        logger.info(f"[DRY-RUN] Would transcode: {path}")
-        return True
-
-    file_size = os.path.getsize(path)
-
-    # Check temp space (source copy + temp output before move)
-    free_gb = get_free_space_gb(cfg.temp_dir)
-    needed_gb = (file_size * 2) / (1024 ** 3)
-    if free_gb < needed_gb:
-        logger.error(
-            f"Only {free_gb:.1f} GB free in temp dir, need ~{needed_gb:.1f} GB for {path}"
-        )
-        return False
-
-    state.mark_started(path, file_size)
-
-    temp_input = make_temp_path(cfg.temp_dir, suffix=os.path.splitext(path)[1])
-    ffmpeg_log = temp_input + ".ffmpeg.log"
-    # Always write ffmpeg output locally with the correct container extension;
-    # ffmpeg uses the extension to determine the output format muxer.
-    temp_output = make_temp_path(cfg.temp_dir, suffix="." + cfg.output_container)
-    # Cleanup orphaned temp from a previous crashed in-place run
-    final_tmp = path + ".plex_compress_tmp"
-    if os.path.exists(final_tmp):
-        try:
-            os.remove(final_tmp)
-        except OSError:
-            pass
-
+def _transcode_attempt(path: str, temp_input: str, temp_output: str, ffmpeg_log: str, final_tmp: str, cfg: Config, state: StateDB, logger) -> bool:
+    """Single transcode attempt. Returns True on success, raises on failure."""
     try:
+        # Cleanup orphaned temp from a previous crashed in-place run
+        if os.path.exists(final_tmp):
+            try:
+                os.remove(final_tmp)
+            except OSError:
+                pass
+
         # Copy source to local temp
         logger.info(f"Copying {path} to temp...")
         if cfg.verify_checksum:
@@ -210,7 +185,6 @@ def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
             )
 
         if cfg.output_dir:
-            # Output-dir mode: preserve relative structure under output_dir
             if cfg.library_path and path.startswith(cfg.library_path):
                 rel = os.path.relpath(path, cfg.library_path)
             else:
@@ -224,9 +198,6 @@ def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
                 f"({in_size / 1024 / 1024:.1f} MB -> {out_size / 1024 / 1024:.1f} MB)"
             )
         else:
-            # In-place replacement
-            # Copy to a temp file next to the target (same filesystem) so we
-            # can atomically replace the original with os.replace().
             shutil.copy2(temp_output, final_tmp)
             backup_path = path + cfg.backup_suffix
             if cfg.keep_backup:
@@ -240,17 +211,52 @@ def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
                 f"Done: {path} ({in_size / 1024 / 1024:.1f} MB -> {out_size / 1024 / 1024:.1f} MB)"
             )
         return True
-
-    except Exception as e:
-        state.mark_failed(path, str(e))
-        logger.error(f"Failed: {path}: {e}")
-        return False
-
     finally:
-        # Cleanup temp files
         for p in (temp_input, temp_output, ffmpeg_log, final_tmp):
             try:
                 if os.path.exists(p):
                     os.remove(p)
             except OSError:
                 pass
+def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
+    """Transcode a single file end-to-end.
+
+    Returns True on success, False on failure.
+    """
+    if cfg.dry_run:
+        logger.info(f"[DRY-RUN] Would transcode: {path}")
+        return True
+
+    file_size = os.path.getsize(path)
+
+    # Check temp space (source copy + temp output before move)
+    free_gb = get_free_space_gb(cfg.temp_dir)
+    needed_gb = (file_size * 2) / (1024 ** 3)
+    if free_gb < needed_gb:
+        logger.error(
+            f"Only {free_gb:.1f} GB free in temp dir, need ~{needed_gb:.1f} GB for {path}"
+        )
+        return False
+
+    state.mark_started(path, file_size)
+
+    last_error = None
+    for attempt in range(2):
+        temp_input = make_temp_path(cfg.temp_dir, suffix=os.path.splitext(path)[1])
+        ffmpeg_log = temp_input + ".ffmpeg.log"
+        temp_output = make_temp_path(cfg.temp_dir, suffix="." + cfg.output_container)
+        final_tmp = path + ".plex_compress_tmp"
+
+        try:
+            return _transcode_attempt(path, temp_input, temp_output, ffmpeg_log, final_tmp, cfg, state, logger)
+        except DurationError as e:
+            last_error = e
+            if attempt == 0:
+                logger.warning(f"Duration mismatch on attempt 1, retrying once...")
+                continue
+            break
+
+    if last_error:
+        state.mark_failed(path, str(last_error))
+        logger.error(f"Failed: {path}: {last_error}")
+    return False
