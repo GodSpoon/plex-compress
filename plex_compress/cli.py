@@ -48,6 +48,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-pattern", default=None, help="Glob pattern to filter scanned files (e.g. '*.mkv', 'S01*')")
     parser.add_argument("--output-dir", "-o", default=None, help="Write outputs to this directory instead of replacing originals in-place")
     parser.add_argument("--force", action="store_true", help="Re-process files already marked as completed in state DB")
+    parser.add_argument("--health-check", action="store_true", help="Run pre-flight health check and exit")
+    parser.add_argument("--min-file-age", type=float, default=None, help="Skip files modified within last N seconds (default: 300)")
+    parser.add_argument("--no-file-locking", action="store_true", help="Disable file locking (allows concurrent processing of same file)")
+    parser.add_argument("--no-post-replace-verify", action="store_true", help="Skip post-replace verification of final file")
+    parser.add_argument("--watch", action="store_true", help="Watch mode: monitor library for new files and auto-process")
+    parser.add_argument("--watch-interval", type=float, default=60.0, help="Polling interval in seconds for watch mode (default: 60)")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
 
@@ -79,14 +85,48 @@ def main(argv: Optional[list] = None) -> int:
         include_pattern=args.include_pattern,
         force=args.force,
         exclusions=args.exclude,
+        min_file_age_seconds=args.min_file_age if args.min_file_age is not None else Config().min_file_age_seconds,
+        enable_file_locking=not args.no_file_locking,
+        post_replace_verify=not args.no_post_replace_verify,
     )
 
     logger = setup_logging(cfg.verbose, cfg.log_path)
+
+    # Health check mode
+    if args.health_check:
+        from .health import run_health_check
+        ok, _messages = run_health_check(cfg, logger)
+        return 0 if ok else 1
+
     state = StateDB(cfg.state_db_path)
 
     if args.reset_failed:
         state.reset_failed()
         logger.info("Reset failed entries.")
+
+    # Watch mode
+    if args.watch:
+        if not cfg.library_path or not os.path.isdir(cfg.library_path):
+            logger.error(f"Library path required for watch mode: {cfg.library_path}")
+            return 1
+        from .watch import LibraryWatcher
+        from .transcoder import transcode_file
+
+        watcher = LibraryWatcher(cfg, state, logger)
+
+        def _process(path: str) -> bool:
+            return transcode_file(path, cfg, state, logger)
+
+        # Set up signal handler to stop watcher
+        def _watch_signal_handler(signum, frame):
+            watcher.stop()
+            logger.info("Watch mode shutting down...")
+
+        signal.signal(signal.SIGINT, _watch_signal_handler)
+        signal.signal(signal.SIGTERM, _watch_signal_handler)
+
+        watcher.run(_process, interval=args.watch_interval)
+        return 0
 
     # Single-file mode bypasses scanning
     if cfg.single_file:

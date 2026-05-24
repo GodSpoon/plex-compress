@@ -66,3 +66,43 @@ def get_free_space_gb(path: str) -> float:
     """Return free space in GB for the filesystem containing path."""
     st = os.statvfs(path)
     return (st.f_bavail * st.f_frsize) / (1024 ** 3)
+
+
+def acquire_file_lock(path: str) -> Optional[int]:
+    """Acquire an exclusive non-blocking lock on a file.
+
+    Returns the file descriptor on success, None if already locked.
+    """
+    import fcntl
+    lock_path = path + ".plex_compress.lock"
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return fd
+    except (IOError, OSError):
+        return None
+
+
+def release_file_lock(fd: Optional[int], path: str) -> None:
+    """Release a file lock and clean up the lock file."""
+    import fcntl
+    if fd is None:
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+        lock_path = path + ".plex_compress.lock"
+        if os.path.exists(lock_path):
+            os.remove(lock_path)
+    except OSError:
+        pass
+
+
+def is_file_recently_modified(path: str, min_age_seconds: float = 300.0) -> bool:
+    """Return True if the file was modified within the last min_age_seconds."""
+    import time
+    try:
+        mtime = os.path.getmtime(path)
+        return (time.time() - mtime) < min_age_seconds
+    except OSError:
+        return False

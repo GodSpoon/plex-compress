@@ -180,3 +180,117 @@ def test_verify_output_subtitle_loss(monkeypatch):
     cfg = Config()
     with pytest.raises(SubtitleLossError):
         verify_output("/tmp/in.mkv", "/tmp/out.mkv", cfg)
+
+
+def test_build_ffmpeg_command_with_probe_single_audio():
+    cfg = Config(
+        video_encoder="hevc_videotoolbox",
+        video_quality=75,
+        audio_encoder="aac",
+        audio_bitrate="160k",
+        output_container="mkv",
+    )
+    probe = {
+        "streams": [
+            {"codec_type": "video", "codec_name": "h264"},
+            {"codec_type": "audio", "codec_name": "ac3", "channels": 6, "disposition": {"default": 1}},
+        ]
+    }
+    cmd = build_ffmpeg_command("/tmp/in.mkv", "/tmp/out.mkv", cfg, probe)
+    assert "-c:a:0" in cmd
+    assert cmd[cmd.index("-c:a:0") + 1] == "aac"
+    assert "-b:a:0" in cmd
+    assert cmd[cmd.index("-b:a:0") + 1] == "160k"
+    assert "-ac:a:0" in cmd
+    assert cmd[cmd.index("-ac:a:0") + 1] == "2"
+    assert "-af:a:0" in cmd
+    assert "loudnorm" in cmd[cmd.index("-af:a:0") + 1]
+
+
+def test_build_ffmpeg_command_with_probe_multi_audio():
+    cfg = Config(
+        video_encoder="hevc_videotoolbox",
+        video_quality=75,
+        audio_encoder="aac",
+        audio_bitrate="160k",
+        output_container="mkv",
+    )
+    probe = {
+        "streams": [
+            {"codec_type": "video", "codec_name": "h264"},
+            {"codec_type": "audio", "codec_name": "ac3", "channels": 6, "disposition": {"default": 1}},
+            {"codec_type": "audio", "codec_name": "aac", "channels": 2, "disposition": {"default": 0}},
+        ]
+    }
+    cmd = build_ffmpeg_command("/tmp/in.mkv", "/tmp/out.mkv", cfg, probe)
+    # Default stream (index 0) gets transcoded
+    assert "-c:a:0" in cmd
+    assert cmd[cmd.index("-c:a:0") + 1] == "aac"
+    assert "-b:a:0" in cmd
+    assert cmd[cmd.index("-b:a:0") + 1] == "160k"
+    assert "-ac:a:0" in cmd
+    assert cmd[cmd.index("-ac:a:0") + 1] == "2"
+    assert "-af:a:0" in cmd
+    assert "loudnorm" in cmd[cmd.index("-af:a:0") + 1]
+    # Non-default stream (index 1) gets copied
+    assert "-c:a:1" in cmd
+    assert cmd[cmd.index("-c:a:1") + 1] == "copy"
+    # Make sure no bitrate/ac/af for second stream
+    assert "-b:a:1" not in cmd
+    assert "-ac:a:1" not in cmd
+    assert "-af:a:1" not in cmd
+
+
+def test_build_ffmpeg_command_with_probe_default_second():
+    cfg = Config(
+        video_encoder="hevc_videotoolbox",
+        video_quality=75,
+        audio_encoder="aac",
+        audio_bitrate="160k",
+        output_container="mkv",
+    )
+    probe = {
+        "streams": [
+            {"codec_type": "video", "codec_name": "h264"},
+            {"codec_type": "audio", "codec_name": "ac3", "channels": 6, "disposition": {"default": 0}},
+            {"codec_type": "audio", "codec_name": "aac", "channels": 2, "disposition": {"default": 1}},
+        ]
+    }
+    cmd = build_ffmpeg_command("/tmp/in.mkv", "/tmp/out.mkv", cfg, probe)
+    # First audio stream is non-default, gets copied
+    assert "-c:a:0" in cmd
+    assert cmd[cmd.index("-c:a:0") + 1] == "copy"
+    # Second audio stream is default, gets transcoded
+    assert "-c:a:1" in cmd
+    assert cmd[cmd.index("-c:a:1") + 1] == "aac"
+    assert "-b:a:1" in cmd
+    assert cmd[cmd.index("-b:a:1") + 1] == "160k"
+    assert "-ac:a:1" in cmd
+    assert cmd[cmd.index("-ac:a:1") + 1] == "2"
+
+
+def test_build_ffmpeg_command_with_probe_no_default():
+    cfg = Config(
+        video_encoder="hevc_videotoolbox",
+        video_quality=75,
+        audio_encoder="aac",
+        audio_bitrate="160k",
+        output_container="mkv",
+    )
+    probe = {
+        "streams": [
+            {"codec_type": "video", "codec_name": "h264"},
+            {"codec_type": "audio", "codec_name": "eac3", "channels": 6, "disposition": {"default": 0}},
+            {"codec_type": "audio", "codec_name": "aac", "channels": 2, "disposition": {"default": 0}},
+        ]
+    }
+    cmd = build_ffmpeg_command("/tmp/in.mkv", "/tmp/out.mkv", cfg, probe)
+    # No stream marked default; first audio stream treated as default
+    assert "-c:a:0" in cmd
+    assert cmd[cmd.index("-c:a:0") + 1] == "aac"
+    assert "-b:a:0" in cmd
+    assert "-ac:a:0" in cmd
+    assert "-af:a:0" in cmd
+    # Second stream copied
+    assert "-c:a:1" in cmd
+    assert cmd[cmd.index("-c:a:1") + 1] == "copy"

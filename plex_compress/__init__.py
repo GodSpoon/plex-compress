@@ -1,7 +1,7 @@
 """Plex Compress: transcode Plex libraries to space-efficient HEVC with stereo audio."""
 
 __version__ = "0.1.0"
-__all__ = ["config", "probe", "scanner", "audio", "video", "transcoder", "state", "utils", "cli"]
+__all__ = ["config", "probe", "scanner", "audio", "video", "transcoder", "state", "utils", "cli", "health", "watch"]
 
 
 class PlexCompressError(Exception):

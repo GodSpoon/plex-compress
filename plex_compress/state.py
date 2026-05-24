@@ -43,8 +43,10 @@ class StateDB:
     def _init_db(self):
         with sqlite3.connect(self.db_path) as conn:
             conn.executescript(SCHEMA)
+            # Enable WAL mode for better concurrency and reliability
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
             conn.commit()
-
     def reset_in_progress(self):
         """Reset any in-progress entries to pending (useful after a crash)."""
         with sqlite3.connect(self.db_path) as conn:

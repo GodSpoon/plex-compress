@@ -10,10 +10,14 @@ from .probe import (
     probe_file, get_video_stream, get_audio_streams, get_subtitle_streams,
     get_duration, get_file_size, get_attachment_streams, get_chapters
 )
-from .audio import build_audio_encoder_args
+from .audio import build_audio_encoder_args, build_audio_filter
+
 from .video import build_video_encoder_args
 from .state import StateDB
-from .utils import copy_with_verify, safe_move, make_temp_path, get_free_space_gb
+from .utils import (
+    copy_with_verify, safe_move, make_temp_path, get_free_space_gb,
+    acquire_file_lock, release_file_lock, is_file_recently_modified,
+)
 from . import (
     TranscodeError,
     VerificationError,
@@ -33,10 +37,11 @@ from . import (
     AudioLossError,
     AttachmentLossError,
     ChapterLossError,
+    LockError,
 )
 
 
-def build_ffmpeg_command(input_path: str, output_path: str, cfg: Config) -> list:
+def build_ffmpeg_command(input_path: str, output_path: str, cfg: Config, probe_data: Optional[dict] = None) -> list:
     """Build the full ffmpeg command list."""
     cmd = [
         "ffmpeg",
@@ -54,7 +59,33 @@ def build_ffmpeg_command(input_path: str, output_path: str, cfg: Config) -> list
     cmd.extend(build_video_encoder_args(cfg))
 
     # Audio
-    cmd.extend(build_audio_encoder_args(cfg))
+    if probe_data is not None:
+        audio_streams = [s for s in probe_data.get("streams", []) if s.get("codec_type") == "audio"]
+        if audio_streams:
+            default_idx = 0
+            for i, stream in enumerate(audio_streams):
+                dispositions = stream.get("disposition", {})
+                if dispositions.get("default") == 1:
+                    default_idx = i
+                    break
+
+            audio_filter = build_audio_filter(cfg)
+            for i, stream in enumerate(audio_streams):
+                if i == default_idx:
+                    if audio_filter:
+                        cmd.extend([f"-af:a:{i}", audio_filter])
+                    if not cfg.use_rfc7845_downmix:
+                        cmd.extend([f"-ac:a:{i}", str(cfg.audio_channels)])
+                    cmd.extend([
+                        f"-c:a:{i}", cfg.audio_encoder,
+                        f"-b:a:{i}", cfg.audio_bitrate,
+                    ])
+                else:
+                    cmd.extend([f"-c:a:{i}", "copy"])
+        else:
+            cmd.extend(build_audio_encoder_args(cfg))
+    else:
+        cmd.extend(build_audio_encoder_args(cfg))
 
     # Subtitles: copy all
     cmd.extend(["-c:s", "copy"])
@@ -63,6 +94,7 @@ def build_ffmpeg_command(input_path: str, output_path: str, cfg: Config) -> list
     # Container
     cmd.append(output_path)
     return cmd
+
 
 
 def verify_output(input_path: str, output_path: str, cfg: Config) -> None:
@@ -156,7 +188,7 @@ def _transcode_attempt(path: str, temp_input: str, temp_output: str, ffmpeg_log:
             shutil.copy2(path, temp_input)
 
         # Build and run ffmpeg
-        cmd = build_ffmpeg_command(temp_input, temp_output, cfg)
+        cmd = build_ffmpeg_command(temp_input, temp_output, cfg, probe_file(temp_input))
         logger.info(f"Transcoding: ffmpeg {' '.join(cmd[:12])} ...")
         with open(ffmpeg_log, "w") as stderr_fh:
             try:
@@ -206,6 +238,20 @@ def _transcode_attempt(path: str, temp_input: str, temp_output: str, ffmpeg_log:
                 os.replace(path, backup_path)
                 logger.info(f"Keeping backup at {backup_path}")
             os.replace(final_tmp, path)
+
+            # Post-replace verification: ensure the replaced file is valid
+            if cfg.post_replace_verify:
+                logger.info("Verifying replaced file...")
+                try:
+                    verify_output(temp_input, path, cfg)
+                except Exception as e:
+                    # Attempt rollback if backup exists
+                    if cfg.keep_backup and os.path.exists(backup_path):
+                        logger.error(f"Post-replace verification failed, rolling back: {e}")
+                        os.replace(backup_path, path)
+                        raise SafetyError(f"Post-replace verification failed, rolled back: {e}")
+                    raise SafetyError(f"Post-replace verification failed (no backup): {e}")
+
             state.mark_completed(path, out_size)
             logger.info(
                 f"Done: {path} ({in_size / 1024 / 1024:.1f} MB -> {out_size / 1024 / 1024:.1f} MB)"
@@ -227,6 +273,13 @@ def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
         logger.info(f"[DRY-RUN] Would transcode: {path}")
         return True
 
+    # File age guard: skip files still being written
+    if is_file_recently_modified(path, cfg.min_file_age_seconds):
+        logger.info(
+            f"Skipping recently modified file (lt; {cfg.min_file_age_seconds}s old): {path}"
+        )
+        return False
+
     file_size = os.path.getsize(path)
 
     # Check temp space (source copy + temp output before move)
@@ -238,25 +291,36 @@ def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
         )
         return False
 
+    # Acquire file lock to prevent concurrent processing
+    lock_fd = None
+    if cfg.enable_file_locking:
+        lock_fd = acquire_file_lock(path)
+        if lock_fd is None:
+            logger.info(f"Skipping locked file (another process is working on it): {path}")
+            return False
+
     state.mark_started(path, file_size)
 
-    last_error = None
-    for attempt in range(2):
-        temp_input = make_temp_path(cfg.temp_dir, suffix=os.path.splitext(path)[1])
-        ffmpeg_log = temp_input + ".ffmpeg.log"
-        temp_output = make_temp_path(cfg.temp_dir, suffix="." + cfg.output_container)
-        final_tmp = path + ".plex_compress_tmp"
+    try:
+        last_error = None
+        for attempt in range(2):
+            temp_input = make_temp_path(cfg.temp_dir, suffix=os.path.splitext(path)[1])
+            ffmpeg_log = temp_input + ".ffmpeg.log"
+            temp_output = make_temp_path(cfg.temp_dir, suffix="." + cfg.output_container)
+            final_tmp = path + ".plex_compress_tmp"
 
-        try:
-            return _transcode_attempt(path, temp_input, temp_output, ffmpeg_log, final_tmp, cfg, state, logger)
-        except DurationError as e:
-            last_error = e
-            if attempt == 0:
-                logger.warning(f"Duration mismatch on attempt 1, retrying once...")
-                continue
-            break
+            try:
+                return _transcode_attempt(path, temp_input, temp_output, ffmpeg_log, final_tmp, cfg, state, logger)
+            except DurationError as e:
+                last_error = e
+                if attempt == 0:
+                    logger.warning(f"Duration mismatch on attempt 1, retrying once...")
+                    continue
+                break
 
-    if last_error:
-        state.mark_failed(path, str(last_error))
-        logger.error(f"Failed: {path}: {last_error}")
-    return False
+        if last_error:
+            state.mark_failed(path, str(last_error))
+            logger.error(f"Failed: {path}: {last_error}")
+        return False
+    finally:
+        release_file_lock(lock_fd, path)

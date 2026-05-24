@@ -74,6 +74,10 @@ class Config:
     verify_output: bool = True
     verify_duration_tolerance: float = 2.0  # seconds
     verify_checksum: bool = True
+    min_file_age_seconds: float = 300.0  # Skip files modified within last 5 minutes
+    enable_file_locking: bool = True
+    post_replace_verify: bool = True
+    health_check_encode_seconds: float = 5.0  # Duration of health-check test encode
 
     def __post_init__(self):
         if self.library_path:
