@@ -77,7 +77,7 @@ while IFS= read -r line; do
         args+=(--limit "$LIMIT")
     fi
 
-    python3 -m plex_compress "$show_dir" "${args[@]}"
+    python3 -m plex_compress "$show_dir" "${args[@]}" || true
 
 done <<< "$SORTED"
 
