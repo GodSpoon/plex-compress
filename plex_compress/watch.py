@@ -12,10 +12,11 @@ from .state import StateDB
 class LibraryWatcher:
     """Polls a library path for new or modified video files."""
 
-    def __init__(self, cfg: Config, state: StateDB, logger):
+    def __init__(self, cfg: Config, state: StateDB, logger, intelligent: bool = True):
         self.cfg = cfg
         self.state = state
         self.logger = logger
+        self.intelligent = intelligent
         self._running = True
 
     def stop(self):
@@ -24,7 +25,12 @@ class LibraryWatcher:
 
     def _find_candidates(self) -> list:
         """Find all candidate files that are not yet completed."""
-        from .scanner import is_candidate
+        if self.intelligent:
+            from .intelligence import is_candidate_intelligent
+            candidate_fn = is_candidate_intelligent
+        else:
+            from .scanner import is_candidate
+            candidate_fn = is_candidate
 
         files = find_video_files(self.cfg.library_path, self.cfg.exclusions)
         candidates = []
@@ -41,7 +47,11 @@ class LibraryWatcher:
             if is_file_recently_modified(path, self.cfg.min_file_age_seconds):
                 continue
 
-            ok, reason, _probe = is_candidate(path, self.cfg)
+            if self.intelligent:
+                ok, reason, _probe, _meta = candidate_fn(path, self.cfg, state=self.state)
+            else:
+                ok, reason, _probe = candidate_fn(path, self.cfg)
+
             if ok:
                 candidates.append(path)
             elif status is None:
@@ -56,8 +66,9 @@ class LibraryWatcher:
         process_callback: function(path) -> bool, called for each candidate file.
         interval: polling interval in seconds.
         """
+        mode_str = "intelligent" if self.intelligent else "basic"
         self.logger.info(
-            f"Watch mode started: monitoring {self.cfg.library_path} "
+            f"Watch mode started ({mode_str}): monitoring {self.cfg.library_path} "
             f"every {interval}s"
         )
 
