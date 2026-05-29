@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plex Compress Web UI</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<button class="mobile-toggle" aria-label="Open menu">☰</button>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h1><span class="dot idle" id="statusDot"></span> Plex Compress</h1>
+      <div class="text-sm text-muted" id="subtitle">Loading...</div>
+    </div>
+    <nav class="sidebar-nav">
+      <button class="nav-item active" data-view="dashboard">
+        <span class="nav-icon">◈</span> Dashboard
+      </button>
+      <button class="nav-item" data-view="queue">
+        <span class="nav-icon">▤</span> Queue
+      </button>
+      <button class="nav-item" data-view="library">
+        <span class="nav-icon">▦</span> Library
+      </button>
+      <button class="nav-item" data-view="reports">
+        <span class="nav-icon">◉</span> Reports
+      </button>
+      <button class="nav-item" data-view="config">
+        <span class="nav-icon">⚙</span> Configuration
+      </button>
+      <button class="nav-item" data-view="logs">
+        <span class="nav-icon">▤</span> Logs
+      </button>
+      <button class="nav-item" data-view="extensions">
+        <span class="nav-icon">⬡</span> Extensions
+      </button>
+    </nav>
+    <div class="sidebar-footer">
+      <div id="statusPill" class="status-pill idle">Idle</div>
+      <div class="mt-2">Auto-refreshing</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <!-- DASHBOARD -->
+    <section class="view-section active" id="view-dashboard">
+      <div class="topbar">
+        <h2>Dashboard</h2>
+        <div class="action-bar">
+          <input type="number" id="quickLimit" placeholder="Limit" min="1" style="width:70px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--fg);">
+          <button class="btn" id="btnHealthCheck">Health Check</button>
+          <button class="btn" id="btnDryRun">Dry Run</button>
+          <button class="btn" id="btnScan">Scan</button>
+          <button class="btn primary" id="btnTranscode">Transcode</button>
+          <button class="btn" id="btnWatchStart">Watch On</button>
+          <button class="btn" id="btnWatchStop">Watch Off</button>
+          <button class="btn danger" id="btnStop">Stop</button>
+          <button class="btn ghost" id="btnResetFailed">Reset Failed</button>
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="label">Completed</div>
+          <div class="value" id="statCompleted">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Failed</div>
+          <div class="value failed" id="statFailed">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Pending</div>
+          <div class="value warn" id="statPending">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Space Saved</div>
+          <div class="value saved" id="statSaved">—</div>
+          <div class="sub" id="statSavedSub"></div>
+        </div>
+        <div class="stat-card" style="border-color:rgba(96,165,250,0.3)">
+          <div class="label" style="color:var(--info)">Session Files</div>
+          <div class="value" id="statSessionFiles">—</div>
+        </div>
+        <div class="stat-card" style="border-color:rgba(96,165,250,0.3)">
+          <div class="label" style="color:var(--info)">Session Saved</div>
+          <div class="value saved" id="statSessionSaved">—</div>
+        </div>
+      </div>
+
+      <div class="card progress-section">
+        <h3>Overall Progress</h3>
+        <div class="progress-bar-wrap">
+          <div class="progress-bar" id="progressBar" style="width:0%"><span id="progressText">0%</span></div>
+        </div>
+        <div class="progress-meta">
+          <span><span class="legend-dot" style="background:var(--accent)"></span> <span id="legendCompleted">0 done</span></span>
+          <span><span class="legend-dot" style="background:var(--err)"></span> <span id="legendFailed">0 failed</span></span>
+          <span><span class="legend-dot" style="background:var(--fg3)"></span> <span id="legendPending">0 remaining</span></span>
+        </div>
+      </div>
+
+      <div class="card" id="currentCard">
+        <h3>Current Activity</h3>
+        <div class="current-file" id="currentFile">Checking...</div>
+        <div class="current-show text-muted text-sm" id="currentShow"></div>
+      </div>
+
+      <div class="card">
+        <h3>Recent Transcodes</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>File</th><th>Status</th><th>Original</th><th>Output</th><th>Saved</th></tr></thead>
+            <tbody id="recentTable"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Failed Files</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>File</th><th>Reason</th></tr></thead>
+            <tbody id="failedTable"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Shows Breakdown</h3>
+        <div class="shows-grid" id="showsGrid"></div>
+      </div>
+    </section>
+
+    <!-- QUEUE -->
+    <section class="view-section" id="view-queue">
+      <div class="topbar"><h2>Queue</h2></div>
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>File</th><th>Codec</th><th>Resolution</th><th>Size</th><th>Predicted Savings</th></tr></thead>
+            <tbody id="queueTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- LIBRARY -->
+    <section class="view-section" id="view-library">
+      <div class="topbar">
+        <h2>Library</h2>
+        <div class="action-bar">
+          <input type="text" id="libFilter" placeholder="Search files..." style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--fg);min-width:220px;">
+          <select id="libStatusFilter" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--fg);">
+            <option value="">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="completed">Completed</option>
+            <option value="failed">Failed</option>
+            <option value="skipped">Skipped</option>
+          </select>
+        </div>
+      </div>
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>File</th><th>Status</th><th>Codec</th><th>Resolution</th><th>Original</th><th>Output</th></tr></thead>
+            <tbody id="libraryTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- REPORTS -->
+    <section class="view-section" id="view-reports">
+      <div class="topbar"><h2>Reports</h2></div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="label">Prediction Accuracy</div>
+          <div class="value" id="reportAccuracy">—</div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Savings by Source Codec</h3>
+        <div class="chart-container"><canvas id="chartCodec"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Savings by Resolution</h3>
+        <div class="chart-container"><canvas id="chartResolution"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Top Pending Candidates</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>File</th><th>Codec</th><th>Resolution</th><th>Predicted Savings</th></tr></thead>
+            <tbody id="topPendingTable"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Scan History</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Time</th><th>Total</th><th>Candidates</th><th>Est. Savings</th></tr></thead>
+            <tbody id="scanHistoryTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- CONFIG -->
+    <section class="view-section" id="view-config">
+      <div class="topbar">
+        <h2>Configuration</h2>
+        <div class="action-bar">
+          <button class="btn" id="presetNvenc">NVENC Preset</button>
+          <button class="btn" id="presetVideotoolbox">VideoToolbox Preset</button>
+          <button class="btn" id="presetCpu">CPU Preset</button>
+          <button class="btn primary" id="btnSaveConfig">Save</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Paths</h3>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Library Path</label>
+            <input type="text" id="cfgLibraryPath" placeholder="/mnt/plex">
+            <small>Root directory to scan and transcode</small>
+          </div>
+          <div class="form-group">
+            <label>Temp Directory</label>
+            <input type="text" id="cfgTempDir" placeholder="~/tmp/plex_compress">
+          </div>
+          <div class="form-group">
+            <label>State DB Path</label>
+            <input type="text" id="cfgStateDb" placeholder="~/.plex_compress/state.db">
+          </div>
+          <div class="form-group">
+            <label>Log Path</label>
+            <input type="text" id="cfgLogPath" placeholder="~/.plex_compress/webui.log">
+          </div>
+          <div class="form-group">
+            <label>Output Directory</label>
+            <input type="text" id="cfgOutputDir" placeholder="(leave empty for in-place)">
+            <small>Non-destructive mode if set</small>
+          </div>
+          <div class="form-group">
+            <label>Single File</label>
+            <input type="text" id="cfgSingleFile" placeholder="(leave empty for batch)">
+          </div>
+          <div class="form-group">
+            <label>Include Pattern</label>
+            <input type="text" id="cfgIncludePattern" placeholder="*.mkv">
+          </div>
+          <div class="form-group">
+            <label>Exclusions (comma-separated)</label>
+            <input type="text" id="cfgExclusions" placeholder="sample,extras">
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Video &amp; Audio</h3>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Video Encoder</label>
+            <select id="cfgEncoder">
+              <option value="libx265">libx265 (CPU)</option>
+              <option value="hevc_videotoolbox">hevc_videotoolbox (Apple)</option>
+              <option value="hevc_nvenc">hevc_nvenc (NVIDIA)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Video Quality</label>
+            <input type="number" id="cfgQuality" min="0" max="51">
+            <small>CRF/CQ: 0-51 for x265/NVENC, 0-100 for VideoToolbox</small>
+          </div>
+          <div class="form-group">
+            <label>Video Preset</label>
+            <input type="text" id="cfgPreset" placeholder="medium / p4">
+          </div>
+          <div class="form-group">
+            <label>Audio Bitrate</label>
+            <input type="text" id="cfgAudioBitrate" placeholder="160k">
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Processing &amp; Safety</h3>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Parallel Jobs</label>
+            <input type="number" id="cfgParallel" min="1" max="8">
+          </div>
+          <div class="form-group">
+            <label>Limit</label>
+            <input type="number" id="cfgLimit" min="1" placeholder="unlimited">
+          </div>
+          <div class="form-group">
+            <label>Watch Interval (seconds)</label>
+            <input type="number" id="cfgWatchInterval" min="10">
+          </div>
+          <div class="form-group">
+            <label>Min File Age (seconds)</label>
+            <input type="number" id="cfgMinFileAge" min="0">
+            <small>Skip files modified within this window</small>
+          </div>
+        </div>
+        <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px;max-width:480px;">
+          <label class="toggle-row">
+            <div>
+              <div class="toggle-label">Keep Backup</div>
+              <div class="toggle-hint">Store .plex_compress_backup originals</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="cfgBackup"><span class="slider"></span></label>
+          </label>
+          <label class="toggle-row">
+            <div>
+              <div class="toggle-label">Dry Run</div>
+              <div class="toggle-hint">Scan only, do not transcode</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="cfgDryRun"><span class="slider"></span></label>
+          </label>
+          <label class="toggle-row">
+            <div>
+              <div class="toggle-label">Force Reprocess</div>
+              <div class="toggle-hint">Re-process already-completed files</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="cfgForce"><span class="slider"></span></label>
+          </label>
+          <label class="toggle-row">
+            <div>
+              <div class="toggle-label">Verbose Logging</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="cfgVerbose"><span class="slider"></span></label>
+          </label>
+          <label class="toggle-row">
+            <div>
+              <div class="toggle-label">Verify Checksum</div>
+              <div class="toggle-hint">SHA-256 verify when copying over network mounts</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="cfgVerifyChecksum"><span class="slider"></span></label>
+          </label>
+          <label class="toggle-row">
+            <div>
+              <div class="toggle-label">File Locking</div>
+              <div class="toggle-hint">Prevent concurrent processing of the same file</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="cfgFileLocking"><span class="slider"></span></label>
+          </label>
+          <label class="toggle-row">
+            <div>
+              <div class="toggle-label">Post-Replace Verify</div>
+              <div class="toggle-hint">Re-probe output after atomic swap</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="cfgPostReplaceVerify"><span class="slider"></span></label>
+          </label>
+          <label class="toggle-row">
+            <div>
+              <div class="toggle-label">Intelligent Scan</div>
+              <div class="toggle-hint">Persist metadata and predict savings</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="cfgIntelligentScan"><span class="slider"></span></label>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <!-- LOGS -->
+    <section class="view-section" id="view-logs">
+      <div class="topbar"><h2>Live Logs</h2></div>
+      <div class="card">
+        <div class="terminal" id="logTerminal">Connecting...</div>
+      </div>
+    </section>
+
+    <!-- EXTENSIONS -->
+    <section class="view-section" id="view-extensions">
+      <div class="topbar"><h2>Extensions</h2></div>
+      <div class="card">
+        <p class="text-muted text-sm mb-0">Extensions are loaded from <code>~/.plex_compress/webui/extensions/</code>. Each <code>.py</code> file should define a <code>register(app)</code> function.</p>
+        <div id="extensionsList" style="margin-top:12px;"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="toast-container"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
