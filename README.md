@@ -288,6 +288,66 @@ Every output is verified before the original is replaced:
 - **Stale job reset**: auto-resets `in_progress` entries to `pending` on startup (crash recovery)
 - **Retry logic**: files failing with duration mismatch are retried once before being marked failed
 
+## Web UI
+
+A built-in lightweight web dashboard is available for setup, monitoring, and operation.
+
+### Start the Web UI
+
+```bash
+# Default: http://0.0.0.0:8765/
+python3 -m plex_compress.webui
+
+# Or use the convenience script
+python3 scripts/webui.py
+
+# Custom host/port
+python3 -m plex_compress.webui --host 127.0.0.1 --port 8080
+```
+
+### Features
+
+- **Dashboard** — real-time stats, progress, current activity, recent/failed files, per-show breakdown
+- **Queue** — pending candidates sorted by predicted space savings
+- **Library** — searchable/filterable view of all tracked files
+- **Reports** — charts by codec and resolution, scan history, prediction accuracy
+- **Configuration** — full settings form with encoder presets (NVENC, VideoToolbox, CPU)
+- **Live Logs** — streaming log tail via Server-Sent Events
+- **Extensions** — drop `.py` files into `~/.plex_compress/webui/extensions/` to add custom routes and event listeners
+
+### API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/status` | Current stats, runner state, recent files |
+| GET | `/api/queue` | Top pending candidates |
+| GET | `/api/recent` | Recent completed files |
+| GET | `/api/failed` | Failed files |
+| GET | `/api/report` | Full report (summary, by codec, by resolution, scan history) |
+| GET | `/api/logs` | Recent buffered log lines |
+| GET | `/api/events` | SSE stream for real-time updates |
+| GET | `/api/config` | Current configuration |
+| POST | `/api/config` | Update configuration |
+| POST | `/api/health-check` | Run pre-flight health check |
+| POST | `/api/scan` | Start scan (dry-run or intelligent) |
+| POST | `/api/transcode` | Start batch transcode |
+| POST | `/api/watch` | Start/stop watch mode |
+| POST | `/api/stop` | Stop current operation |
+| POST | `/api/reset-failed` | Reset failed entries to pending |
+| GET | `/api/extensions` | List loaded extensions |
+
+### Extending the Web UI
+
+Create `~/.plex_compress/webui/extensions/my_plugin.py`:
+
+```python
+def register(app):
+    # Add a custom route
+    app.add_route("GET", "/api/hello", lambda h, p, m: h._send_json({"hello": "world"}))
+    # Listen to events
+    app.add_event_listener("finished", lambda payload: print("Job finished!"))
+```
+
 ## Tests
 
 ```bash
