@@ -97,6 +97,10 @@ html, body {
 }
 .nav-item:hover { background: var(--bg3); color: var(--fg); }
 .nav-item.active { background: var(--accent-dim); color: var(--accent); }
+.nav-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 .nav-icon { width: 20px; text-align: center; }
 
 .sidebar-footer {
@@ -164,12 +168,19 @@ html, body {
   gap: 6px;
 }
 .btn:hover { background: var(--bg4); }
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .btn.primary { background: var(--accent); color: #064e3b; border-color: var(--accent2); }
 .btn.primary:hover { filter: brightness(1.05); }
+.btn.primary:focus-visible { outline-color: var(--accent2); }
 .btn.danger { background: var(--err); color: #450a0a; border-color: #ef4444; }
 .btn.danger:hover { filter: brightness(1.05); }
+.btn.danger:focus-visible { outline-color: #ef4444; }
 .btn.ghost { background: transparent; border-color: transparent; color: var(--fg2); }
 .btn.ghost:hover { background: var(--bg3); color: var(--fg); }
+.btn.ghost:focus-visible { outline-color: var(--fg2); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Cards */
@@ -430,6 +441,10 @@ td.status.pending { color: var(--fg3); }
 }
 input:checked + .slider { background: var(--accent); }
 input:checked + .slider:before { transform: translateX(18px); background: #064e3b; }
+input:focus-visible + .slider {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 /* Logs terminal */
 .terminal {
@@ -546,3 +561,17 @@ input:checked + .slider:before { transform: translateX(18px); background: #064e3
 .text-right { text-align: right; }
 .mb-0 { margin-bottom: 0; }
 .mt-2 { margin-top: 8px; }
+
+/* Accessibility: respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .dot {
+    animation: none !important;
+  }
+}
