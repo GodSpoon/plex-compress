@@ -639,20 +639,30 @@ class StateDB:
         return sorted_shows[:limit]
 
     @staticmethod
-    def _infer_media_type(path: str) -> str:
+    def _infer_media_type(path: str, duration: Optional[float] = None) -> str:
         lower = path.lower()
         basename = os.path.basename(path)
+        # TV shows: explicit path or episode pattern
         if "tv shows" in lower or re.search(r"S\d{2}E\d{2}", basename, re.IGNORECASE):
             return "tv_shows"
+        # Movies: explicit path
         if "movies" in lower:
             return "movies"
+        # Movie heuristic: year in filename (1900-2035) and no episode pattern
+        if re.search(r"\b(19\d{2}|20[0-3]\d)\b", basename):
+            if not re.search(r"S\d{2}E\d{2}", basename, re.IGNORECASE):
+                return "movies"
+        # Movie heuristic: long duration (> 45 min) with no season/episode indicators
+        if duration and duration > 2700:
+            if not re.search(r"(season|episode|ep\b|s\d{1,2}|e\d{1,2})", basename, re.IGNORECASE):
+                return "movies"
         return "other"
 
     def get_media_type_breakdown(self) -> Dict[str, Any]:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                """SELECT path, original_size, predicted_savings_bytes
+                """SELECT path, original_size, predicted_savings_bytes, duration
                    FROM files WHERE status IN ('pending', 'failed')"""
             ).fetchall()
 
@@ -662,7 +672,7 @@ class StateDB:
             "other": {"count": 0, "size_bytes": 0, "pending_savings_bytes": 0},
         }
         for r in rows:
-            mtype = self._infer_media_type(r["path"])
+            mtype = self._infer_media_type(r["path"], duration=r["duration"])
             result[mtype]["count"] += 1
             result[mtype]["size_bytes"] += r["original_size"] or 0
             result[mtype]["pending_savings_bytes"] += r["predicted_savings_bytes"] or 0

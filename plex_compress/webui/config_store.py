@@ -19,7 +19,7 @@ DEFAULT_WEBUI_CONFIG: Dict[str, Any] = {
     "audio_bitrate": "160k",
     "parallel_jobs": 1,
     "keep_backup": False,
-    "dry_run": False,
+    "dry_run": True,
     "verbose": False,
     "output_dir": None,
     "include_pattern": None,
