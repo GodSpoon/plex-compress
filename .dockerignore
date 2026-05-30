@@ -1,0 +1,65 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Tests / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+tox.ini
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local state (mounted as volumes, not baked into image)
+*.db
+*.db-journal
+*.db-wal
+*.log
+
+# Documentation artifacts (keep README.md)
+PLAN.md
+AUDIT.md
+TEST_PLAN.md
+progress.md
+
+# Scripts that are host-side only
+scripts/*.sh
+!scripts/docker-entrypoint.sh
+
+# Env files
+.env
+.env.*
