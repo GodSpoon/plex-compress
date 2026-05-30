@@ -1,6 +1,7 @@
 """SQLite state database for resume, tracking, and intelligent transcoding decisions."""
 
 import os
+import re
 import sqlite3
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Tuple
@@ -189,7 +190,7 @@ class StateDB:
                 (self._now(), name)
             )
             conn.commit()
-            return c.lastrowid
+            return c.lastrowid or 0
 
     def end_session(self, session_id: int):
         """Mark a session as ended."""
@@ -470,7 +471,7 @@ class StateDB:
                 (self._now(), total_files, candidates, already_optimal, skipped, estimated_savings_gb, library_path)
             )
             conn.commit()
-            return c.lastrowid
+            return c.lastrowid or 0
 
     def record_scan_file(self, scan_id: int, file_id: int, was_candidate: bool, reason: str):
         with sqlite3.connect(self.db_path) as conn:
@@ -501,6 +502,260 @@ class StateDB:
                 (f"%{show_pattern}%",)
             )
             conn.commit()
+
+    # ------------------------------------------------------------------
+    # Scan report helpers
+    # ------------------------------------------------------------------
+
+    def get_scan_summary(self) -> Dict[str, Any]:
+        """Return overall scan summary from files table."""
+        with sqlite3.connect(self.db_path) as conn:
+            total = conn.execute("SELECT COUNT(*) FROM files").fetchone()[0] or 0
+            candidates = conn.execute(
+                "SELECT COUNT(*) FROM files WHERE status IN ('pending', 'failed')"
+            ).fetchone()[0] or 0
+            already_optimal = conn.execute(
+                "SELECT COUNT(*) FROM files WHERE status='skipped' AND reason LIKE '%already_optimal%'"
+            ).fetchone()[0] or 0
+            skipped = conn.execute(
+                "SELECT COUNT(*) FROM files WHERE status='skipped'"
+            ).fetchone()[0] or 0
+            total_size = conn.execute(
+                "SELECT SUM(original_size) FROM files"
+            ).fetchone()[0] or 0
+            pending_size = conn.execute(
+                "SELECT SUM(original_size) FROM files WHERE status IN ('pending', 'failed')"
+            ).fetchone()[0] or 0
+            completed_size = conn.execute(
+                "SELECT SUM(original_size) FROM files WHERE status='completed'"
+            ).fetchone()[0] or 0
+            saved = conn.execute(
+                "SELECT SUM(COALESCE(original_size,0) - COALESCE(output_size,0)) FROM files WHERE status='completed'"
+            ).fetchone()[0] or 0
+            estimated_savings = conn.execute(
+                "SELECT SUM(predicted_savings_bytes) FROM files WHERE status IN ('pending', 'failed')"
+            ).fetchone()[0] or 0
+
+        return {
+            "total_files": total,
+            "candidates": candidates,
+            "already_optimal": already_optimal,
+            "skipped": skipped,
+            "estimated_savings_bytes": estimated_savings,
+            "estimated_savings_gb": round(estimated_savings / (1024 ** 3), 1) if estimated_savings else 0.0,
+            "total_library_size_bytes": total_size,
+            "pending_size_bytes": pending_size,
+            "completed_size_bytes": completed_size,
+            "saved_so_far_bytes": saved,
+        }
+
+    def get_pending_summary(self) -> Dict[str, Any]:
+        """Return counts, sizes, predicted savings for pending files."""
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                """SELECT COUNT(*) as candidates,
+                          SUM(original_size) as pending_size,
+                          SUM(predicted_savings_bytes) as estimated_savings
+                   FROM files WHERE status IN ('pending', 'failed')"""
+            ).fetchone()
+        return {
+            "candidates": row[0] or 0,
+            "pending_size_bytes": row[1] or 0,
+            "estimated_savings_bytes": row[2] or 0,
+        }
+
+    def get_pending_by_codec(self) -> List[Dict[str, Any]]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT video_codec,
+                          COUNT(*) as count,
+                          SUM(original_size) as pending_size,
+                          SUM(predicted_savings_bytes) as predicted_savings
+                   FROM files
+                   WHERE status IN ('pending', 'failed') AND video_codec IS NOT NULL
+                   GROUP BY video_codec
+                   ORDER BY predicted_savings DESC"""
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_pending_by_resolution(self) -> List[Dict[str, Any]]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT video_width, video_height,
+                          COUNT(*) as count,
+                          SUM(predicted_savings_bytes) as predicted_savings
+                   FROM files
+                   WHERE status IN ('pending', 'failed')
+                     AND video_width IS NOT NULL AND video_height IS NOT NULL
+                   GROUP BY video_width, video_height
+                   ORDER BY predicted_savings DESC"""
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    @staticmethod
+    def _extract_show_name(path: str) -> str:
+        parts = path.replace("\\", "/").split("/")
+        lower_parts = [p.lower() for p in parts]
+        if "tv shows" in lower_parts:
+            idx = lower_parts.index("tv shows")
+            if idx + 1 < len(parts):
+                return parts[idx + 1]
+        if "movies" in lower_parts:
+            return "Movies"
+        return parts[-2] if len(parts) >= 2 else "unknown"
+
+    def get_pending_by_show(self, limit: int = 20) -> List[Dict[str, Any]]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            all_rows = conn.execute("SELECT path FROM files").fetchall()
+            pending_rows = conn.execute(
+                """SELECT path, original_size, predicted_savings_bytes
+                   FROM files WHERE status IN ('pending', 'failed')"""
+            ).fetchall()
+
+        show_totals: Dict[str, int] = {}
+        for r in all_rows:
+            name = self._extract_show_name(r["path"])
+            show_totals[name] = show_totals.get(name, 0) + 1
+
+        shows: Dict[str, Dict[str, Any]] = {}
+        for r in pending_rows:
+            name = self._extract_show_name(r["path"])
+            if name not in shows:
+                shows[name] = {
+                    "name": name,
+                    "total": show_totals.get(name, 0),
+                    "pending": 0,
+                    "pending_size": 0,
+                    "predicted_savings": 0,
+                }
+            shows[name]["pending"] += 1
+            shows[name]["pending_size"] += r["original_size"] or 0
+            shows[name]["predicted_savings"] += r["predicted_savings_bytes"] or 0
+
+        sorted_shows = sorted(shows.values(), key=lambda x: -x["predicted_savings"])
+        return sorted_shows[:limit]
+
+    @staticmethod
+    def _infer_media_type(path: str) -> str:
+        lower = path.lower()
+        basename = os.path.basename(path)
+        if "tv shows" in lower or re.search(r"S\d{2}E\d{2}", basename, re.IGNORECASE):
+            return "tv_shows"
+        if "movies" in lower:
+            return "movies"
+        return "other"
+
+    def get_media_type_breakdown(self) -> Dict[str, Any]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT path, original_size, predicted_savings_bytes
+                   FROM files WHERE status IN ('pending', 'failed')"""
+            ).fetchall()
+
+        result = {
+            "tv_shows": {"count": 0, "size_bytes": 0, "pending_savings_bytes": 0},
+            "movies": {"count": 0, "size_bytes": 0, "pending_savings_bytes": 0},
+            "other": {"count": 0, "size_bytes": 0, "pending_savings_bytes": 0},
+        }
+        for r in rows:
+            mtype = self._infer_media_type(r["path"])
+            result[mtype]["count"] += 1
+            result[mtype]["size_bytes"] += r["original_size"] or 0
+            result[mtype]["pending_savings_bytes"] += r["predicted_savings_bytes"] or 0
+        return result
+
+    def get_transcoding_velocity(self) -> Dict[str, Any]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT started_at, completed_at, actual_savings_bytes
+                   FROM files
+                   WHERE status='completed'
+                     AND started_at IS NOT NULL
+                     AND completed_at IS NOT NULL
+                   ORDER BY completed_at DESC
+                   LIMIT 50"""
+            ).fetchall()
+
+        if not rows:
+            return {"gb_per_hour": 0.0, "files_per_hour": 0.0, "avg_seconds_per_file": 0.0}
+
+        total_seconds = 0.0
+        total_savings = 0
+        valid_count = 0
+
+        for r in rows:
+            try:
+                started = datetime.fromisoformat(r["started_at"])
+                completed = datetime.fromisoformat(r["completed_at"])
+                delta = (completed - started).total_seconds()
+                if delta > 0:
+                    total_seconds += delta
+                    total_savings += r["actual_savings_bytes"] or 0
+                    valid_count += 1
+            except (ValueError, TypeError):
+                continue
+
+        if valid_count == 0 or total_seconds == 0:
+            return {"gb_per_hour": 0.0, "files_per_hour": 0.0, "avg_seconds_per_file": 0.0}
+
+        hours = total_seconds / 3600.0
+        gb = total_savings / (1024 ** 3)
+        gb_per_hour = gb / hours if hours > 0 else 0.0
+        files_per_hour = valid_count / hours if hours > 0 else 0.0
+        avg_seconds = total_seconds / valid_count
+
+        return {
+            "gb_per_hour": round(gb_per_hour, 2),
+            "files_per_hour": round(files_per_hour, 2),
+            "avg_seconds_per_file": round(avg_seconds, 1),
+        }
+
+    def get_time_stats(self) -> Dict[str, Any]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT started_at, completed_at
+                   FROM files
+                   WHERE status='completed'
+                     AND started_at IS NOT NULL
+                     AND completed_at IS NOT NULL"""
+            ).fetchall()
+            session_count = conn.execute(
+                "SELECT COUNT(*) FROM sessions"
+            ).fetchone()[0] or 0
+
+        total_seconds = 0.0
+        for r in rows:
+            try:
+                started = datetime.fromisoformat(r["started_at"])
+                completed = datetime.fromisoformat(r["completed_at"])
+                delta = (completed - started).total_seconds()
+                if delta > 0:
+                    total_seconds += delta
+            except (ValueError, TypeError):
+                continue
+
+        return {
+            "total_transcode_seconds": int(total_seconds),
+            "total_transcode_hours": round(total_seconds / 3600.0, 1),
+            "session_count": session_count,
+        }
+
+    def get_eta(self, velocity_gb_per_hour: float) -> Dict[str, Any]:
+        pending = self.get_pending_summary()
+        pending_gb = pending["pending_size_bytes"] / (1024 ** 3)
+        hours = pending_gb / velocity_gb_per_hour if velocity_gb_per_hour > 0 else None
+        return {
+            "pending_files": pending["candidates"],
+            "pending_size_gb": round(pending_gb, 1),
+            "hours_remaining": round(hours, 1) if hours is not None else None,
+            "days_remaining": round(hours / 24.0, 1) if hours is not None else None,
+        }
 
     # ------------------------------------------------------------------
     # Legacy compatibility

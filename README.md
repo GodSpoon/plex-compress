@@ -29,7 +29,133 @@ ffmpeg -encoders 2>/dev/null | grep hevc_nvenc
 nvidia-smi
 ```
 
-## Quick Start
+## Container Usage (Recommended)
+
+Plex Compress ships with first-class Docker/Podman support. The container includes ffmpeg 7.1 with NVENC support and auto-detects the best available encoder at runtime.
+
+### Prerequisites
+
+- **Docker** or **Podman**
+- **Linux + NVIDIA**: `nvidia-container-toolkit` installed
+- **macOS**: No extra container tools needed (see native path below for hardware encoding)
+
+### Quick Start — Container
+
+```bash
+git clone https://github.com/GodSpoon/plex-compress.git
+cd plex-compress
+
+# Copy and edit environment config
+cp .env.example .env
+# Edit PLEX_ROOT and any encoder settings
+```
+
+### Willaird 7 (w7) — Linux + NVIDIA NVENC
+
+```bash
+# Build once
+docker build -t plex-compress:latest .
+# Or with Podman:
+podman build -t plex-compress:latest -f Containerfile .
+
+# One-shot commands via wrapper
+./scripts/docker-run.sh health-check
+./scripts/docker-run.sh dry-run
+./scripts/docker-run.sh transcode --limit 10
+
+# Long-running Web UI + Watch mode via Compose
+./scripts/docker-run.sh webui
+
+# Or manually with Compose
+DOCKER_BUILDKIT=1 docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
+```
+
+The wrapper auto-detects Podman vs Docker and passes `--device nvidia.com/gpu=all` (Podman) or `--runtime=nvidia` (Docker) as needed.
+
+### macOS M5 Pro — Apple Silicon
+
+**⚠️ Apple VideoToolbox does NOT passthrough to Linux containers.** For hardware transcoding on your M5 Pro, use the **native** path. The Docker path is available but falls back to software encoding (`libx265`).
+
+```bash
+# NATIVE (fast — uses VideoToolbox hardware encoding)
+./scripts/docker-run-macos.sh native health-check
+./scripts/docker-run-macos.sh native dry-run
+./scripts/docker-run-macos.sh native transcode --limit 10
+./scripts/docker-run-macos.sh native watch
+./scripts/docker-run-macos.sh native webui
+
+# DOCKER (slow — software encoding, for testing only)
+./scripts/docker-run-macos.sh docker dry-run
+```
+
+### Container Commands
+
+The entrypoint supports these subcommands:
+
+| Command | Description |
+|---------|-------------|
+| `health-check` | Pre-flight validation inside the container |
+| `dry-run` | Scan library and report candidates |
+| `transcode` | Batch transcode |
+| `watch` | Watch-mode (polls for new files) |
+| `webui` | Start Web UI server on `:8765` |
+| `shell` | Drop to bash for debugging |
+| `ffmpeg` | Passthrough to container ffmpeg |
+
+### Container Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PLEX_COMPRESS_ENCODER` | `auto` | `auto`, `hevc_nvenc`, `hevc_videotoolbox`, `libx265` |
+| `PLEX_COMPRESS_QUALITY` | `28` | CRF/CQ value |
+| `PLEX_COMPRESS_PRESET` | `medium` | Encoder preset |
+| `PLEX_COMPRESS_PARALLEL` | `1` | Concurrent transcodes |
+| `PLEX_COMPRESS_LIBRARY_PATH` | `/mnt/plex` | Library mount point inside container |
+| `PLEX_COMPRESS_TEMP_DIR` | `/tmp/plex_compress` | Temp directory (mount a fast disk here) |
+| `PLEX_COMPRESS_STATE_DB` | `/config/state.db` | SQLite database path |
+| `PLEX_COMPRESS_LOG` | `/config/plex_compress.log` | Log file path |
+| `PLEX_COMPRESS_BACKUP` | `0` | Set to `1` to keep originals |
+| `PLEX_COMPRESS_DRY_RUN` | `0` | Set to `1` for scan-only mode |
+| `PLEX_COMPRESS_VERBOSE` | `0` | Set to `1` for debug logging |
+
+### Compose File Reference
+
+| File | Purpose |
+|------|---------|
+| `docker-compose.yml` | Base stack — Web UI + Watch mode |
+| `docker-compose.nvidia.yml` | NVIDIA GPU runtime override (w7) |
+| `docker-compose.macos.yml` | macOS override (forces software encoder) |
+
+### Building Multi-Arch Images
+
+```bash
+# AMD64 + ARM64 (useful for mixed fleets)
+docker buildx create --use
+docker buildx build --platform linux/amd64,linux/arm64 -t plex-compress:latest .
+```
+
+## Native / Manual Install
+
+If you prefer running directly on the host without containers:
+
+Requires **ffmpeg** compiled with the encoder you plan to use:
+
+```bash
+# macOS (VideoToolbox)
+brew install ffmpeg
+
+# Arch Linux (NVENC)
+sudo pacman -S ffmpeg nvidia-utils
+```
+
+For NVENC, verify your GPU is visible:
+
+```bash
+ffmpeg -encoders 2>/dev/null | grep hevc_nvenc
+nvidia-smi
+```
+
+## Quick Start (Native)
 
 ```bash
 # Clone and enter the repo

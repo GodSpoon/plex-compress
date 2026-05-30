@@ -76,6 +76,7 @@ let eventSource = null;
 let statusTimer = null;
 let configCache = {};
 let hasLoadedOnce = false;
+let scanReportCache = null;
 
 /* ---------- Command Palette ---------- */
 const CMD_ITEMS = [
@@ -397,7 +398,11 @@ function toast(message, type = "ok") {
 /* ---------- Dashboard ---------- */
 async function loadStatus() {
 	try {
-		const data = await apiGet("/status");
+		const [data, scanReport] = await Promise.all([
+			apiGet("/status"),
+			apiGet("/scan-report").catch(() => null),
+		]);
+		if (scanReport) scanReportCache = scanReport;
 		renderDashboard(data);
 		if (!hasLoadedOnce) {
 			$("#dashSkeleton").style.display = "none";
@@ -589,6 +594,485 @@ function renderDashboard(data) {
 
 	$("#subtitle").textContent =
 		`${total.toLocaleString()} files tracked across ${shows.length} libraries/shows`;
+
+	// Scan-report derived stats
+	if (scanReportCache) {
+		const ss = scanReportCache.scan_summary || {};
+		const vel = scanReportCache.velocity || {};
+		const ts = scanReportCache.time_stats || {};
+		const eta = scanReportCache.eta || {};
+
+		$("#statProjectedSavings").textContent = fmtBytesDiff(ss.estimated_savings_bytes || 0);
+		$("#statProjectedSavingsSub").textContent =
+			ss.total_library_size_bytes > 0
+				? `${((ss.estimated_savings_bytes / ss.total_library_size_bytes) * 100).toFixed(1)}% of library`
+				: "from pending files";
+
+		$("#statVelocity").textContent =
+			vel.gb_per_hour != null ? vel.gb_per_hour.toFixed(2) : "—";
+		$("#statVelocitySub").textContent =
+			vel.files_per_hour != null ? `${vel.files_per_hour.toFixed(1)} files/hr` : "GB per hour";
+
+		$("#statTimeSpent").textContent =
+			ts.total_transcode_hours != null ? ts.total_transcode_hours.toFixed(1) : "—";
+		$("#statTimeSpentSub").textContent =
+			ts.session_count != null ? `${ts.session_count} sessions` : "total transcode hours";
+
+		const days = eta.days_remaining;
+		$("#statETA").textContent = days != null ? (days < 1 ? "< 1 day" : `${Math.ceil(days)} days`) : "∞";
+		$("#statETASub").textContent =
+			days != null ? `${eta.pending_files || 0} files remaining` : "no velocity data";
+
+		// Enhanced progress text
+		const actualSaved = s.saved_bytes || 0;
+		const projectedMore = ss.estimated_savings_bytes || 0;
+		const totalPotential = actualSaved + projectedMore;
+		$("#progressSavingsLine").textContent =
+			`Actual: ${fmtBytesDiff(actualSaved)} saved · Projected: ${fmtBytesDiff(projectedMore)} more · Total potential: ${fmtBytesDiff(totalPotential)}`;
+
+		// Dashboard charts
+		renderDashboardCharts(scanReportCache);
+	} else {
+		$("#statProjectedSavings").textContent = "—";
+		$("#statVelocity").textContent = "—";
+		$("#statTimeSpent").textContent = "—";
+		$("#statETA").textContent = "—";
+		$("#progressSavingsLine").textContent = "Run a scan to see savings projections";
+	}
+}
+
+/* ---------- Scan Report Modal ---------- */
+async function loadScanReport() {
+	try {
+		const data = await apiGet("/scan-report");
+		scanReportCache = data;
+		renderScanModal(data);
+	} catch (e) {
+		toast("Failed to load scan report", "err");
+	}
+}
+
+function openScanModal() {
+	$("#scanReportModal").style.display = "flex";
+	if (scanReportCache) {
+		renderScanModal(scanReportCache);
+	} else {
+		loadScanReport();
+	}
+}
+
+function closeScanModal() {
+	$("#scanReportModal").style.display = "none";
+}
+
+function renderScanModal(data) {
+	const ss = data.scan_summary || {};
+	const byShow = data.by_show || [];
+	const byCodec = data.by_codec || [];
+
+	// Hero
+	$("#scanHeroNumber").textContent = (ss.estimated_savings_gb || 0).toFixed(1);
+	const pendingPct = ss.total_library_size_bytes > 0
+		? ((ss.pending_size_bytes / ss.total_library_size_bytes) * 100).toFixed(1)
+		: 0;
+	const totalTB = (ss.total_library_size_bytes || 0) / 1024 ** 4;
+	$("#scanHeroSub").textContent = `That's ${pendingPct}% of your ${totalTB.toFixed(2)} TB library`;
+	$("#scanHeroSub2").textContent = `${(ss.candidates || 0).toLocaleString()} files remaining out of ${(ss.total_files || 0).toLocaleString()} total`;
+
+	// Mini stats
+	$("#scanStatLibrarySize").textContent = fmtBytes(ss.total_library_size_bytes || 0);
+	$("#scanStatPendingSize").textContent = fmtBytes(ss.pending_size_bytes || 0);
+	$("#scanStatSavedSoFar").textContent = fmtBytes(ss.saved_so_far_bytes || 0);
+	$("#scanStatOptimal").textContent = (ss.already_optimal || 0).toLocaleString();
+
+	// Treemap: top 20 shows by pending size
+	renderScanTreemap(byShow.slice(0, 20));
+
+	// Top 10 shows horizontal bar
+	renderScanTopShows(byShow.slice(0, 10));
+
+	// Codec doughnut
+	renderScanCodec(byCodec);
+
+	// Media type stacked bar
+	renderScanMediaTypeBar(ss);
+
+	// Codec table legend
+	renderScanCodecTable(byCodec);
+}
+
+function renderScanTreemap(shows) {
+	const ctx = $("#chartScanTreemap")?.getContext("2d");
+	if (!ctx) return;
+	if (charts.scanTreemap) charts.scanTreemap.destroy();
+	if (shows.length === 0) {
+		setChartEmpty("#chartScanTreemap", true, "No show data available.");
+		return;
+	}
+	setChartEmpty("#chartScanTreemap", false);
+
+	const treeData = shows.map((s) => ({
+		name: s.name || "Unknown",
+		value: s.pending_size || 0,
+		predicted: s.predicted_savings || 0,
+	}));
+
+	const mediaTypeColors = { tv_shows: "#3b82f6", movies: "#10b981", other: "#6b7280" };
+	// Infer media type from name heuristic
+	function inferMediaType(name) {
+		if (!name) return "other";
+		if (name === "Movies") return "movies";
+		if (/S\d{2}E\d{2}/i.test(name) || name.includes("Season")) return "tv_shows";
+		return "tv_shows"; // default most shows to TV
+	}
+
+	charts.scanTreemap = new Chart(ctx, {
+		type: "treemap",
+		data: {
+			datasets: [{
+				tree: treeData,
+				key: "value",
+				groups: ["name"],
+				spacing: 1.5,
+				borderWidth: 1,
+				borderColor: "rgba(255,255,255,0.08)",
+				borderRadius: 4,
+				backgroundColor: (ctx) => {
+					const item = ctx.raw;
+					if (!item) return "#6b7280";
+					const name = item._data?.name || item.g || "";
+					const mt = inferMediaType(name);
+					return mediaTypeColors[mt] || "#6b7280";
+				},
+				labels: {
+					align: "left",
+					color: "#f0f2f5",
+					font: { size: 11, weight: "600" },
+					formatter: (ctx) => {
+						const item = ctx.raw;
+						if (!item) return "";
+						const name = item._data?.name || item.g || "";
+						const val = item.v || 0;
+						if (val < 1024 * 1024 * 50) return ""; // skip tiny cells
+						return name.length > 18 ? name.slice(0, 16) + "…" : name;
+					},
+				},
+			}],
+		},
+		options: {
+			responsive: true,
+			maintainAspectRatio: false,
+			plugins: {
+				legend: { display: false },
+				tooltip: {
+					backgroundColor: "#151921",
+					borderColor: "rgba(255,255,255,0.09)",
+					borderWidth: 1,
+					titleColor: "#f0f2f5",
+					bodyColor: "#9aa3b2",
+					padding: 12,
+					cornerRadius: 10,
+					callbacks: {
+						title: (items) => {
+							const item = items[0].raw;
+							return item?._data?.name || "";
+						},
+						label: (item) => {
+							const raw = item.raw;
+							return [
+								`Pending: ${fmtBytes(raw?.v || 0)}`,
+								`Predicted save: ${fmtBytes(raw?._data?.predicted || 0)}`,
+							];
+						},
+					},
+				},
+			},
+		},
+	});
+}
+
+function renderScanTopShows(shows) {
+	const ctx = $("#chartScanTopShows")?.getContext("2d");
+	if (!ctx) return;
+	if (charts.scanTopShows) charts.scanTopShows.destroy();
+	if (shows.length === 0) {
+		setChartEmpty("#chartScanTopShows", true, "No show data available.");
+		return;
+	}
+	setChartEmpty("#chartScanTopShows", false);
+
+	const mediaTypeColors = { tv_shows: "#3b82f6", movies: "#10b981", other: "#6b7280" };
+	function inferMediaType(name) {
+		if (!name) return "other";
+		if (name === "Movies") return "movies";
+		return "tv_shows";
+	}
+
+	charts.scanTopShows = new Chart(ctx, {
+		type: "bar",
+		data: {
+			labels: shows.map((s) => (s.name || "Unknown").substring(0, 24)),
+			datasets: [{
+				label: "Predicted Savings (GB)",
+				data: shows.map((s) => Math.round(((s.predicted_savings || 0) / 1024 ** 3) * 10) / 10),
+				backgroundColor: shows.map((s) => mediaTypeColors[inferMediaType(s.name)] || "#6b7280"),
+				borderRadius: 6,
+				borderSkipped: false,
+			}],
+		},
+		options: {
+			indexAxis: "y",
+			responsive: true,
+			maintainAspectRatio: false,
+			scales: {
+				x: {
+					ticks: { color: "#9aa3b2", font: { size: 11 } },
+					grid: { color: "rgba(255,255,255,0.04)" },
+				},
+				y: {
+					ticks: { color: "#9aa3b2", font: { size: 11 } },
+					grid: { display: false },
+				},
+			},
+			plugins: {
+				legend: { display: false },
+				tooltip: {
+					backgroundColor: "#151921",
+					borderColor: "rgba(255,255,255,0.09)",
+					borderWidth: 1,
+					titleColor: "#f0f2f5",
+					bodyColor: "#9aa3b2",
+					padding: 12,
+					cornerRadius: 10,
+				},
+			},
+		},
+	});
+}
+
+function renderScanCodec(byCodec) {
+	const ctx = $("#chartScanCodec")?.getContext("2d");
+	if (!ctx) return;
+	if (charts.scanCodec) charts.scanCodec.destroy();
+	if (byCodec.length === 0) {
+		setChartEmpty("#chartScanCodec", true, "No codec data available.");
+		return;
+	}
+	setChartEmpty("#chartScanCodec", false);
+
+	const palette = ["#10b981", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6", "#34d399", "#60a5fa", "#fbbf24"];
+	charts.scanCodec = new Chart(ctx, {
+		type: "doughnut",
+		data: {
+			labels: byCodec.map((r) => r.video_codec || "unknown"),
+			datasets: [{
+				data: byCodec.map((r) => r.count || 0),
+				backgroundColor: byCodec.map((_, i) => palette[i % palette.length]),
+				borderWidth: 0,
+				hoverOffset: 6,
+			}],
+		},
+		options: {
+			responsive: true,
+			maintainAspectRatio: false,
+			cutout: "65%",
+			plugins: {
+				legend: {
+					position: "right",
+					labels: { color: "#9aa3b2", font: { size: 12 }, padding: 16 },
+				},
+				tooltip: {
+					backgroundColor: "#151921",
+					borderColor: "rgba(255,255,255,0.09)",
+					borderWidth: 1,
+					titleColor: "#f0f2f5",
+					bodyColor: "#9aa3b2",
+					padding: 12,
+					cornerRadius: 10,
+				},
+			},
+		},
+	});
+}
+
+function renderScanCodecTable(byCodec) {
+	const container = $("#scanCodecTable");
+	empty(container);
+	if (byCodec.length === 0) return;
+
+	const table = h("table", { className: "scan-codec-table-inner" });
+	const thead = h("thead", {},
+		h("tr", {},
+			h("th", {}, "Codec"),
+			h("th", { className: "text-right" }, "Files"),
+			h("th", { className: "text-right" }, "Est. Savings"),
+		),
+	);
+	const tbody = h("tbody");
+	byCodec.forEach((c) => {
+		tbody.appendChild(
+			h("tr", {},
+				h("td", {}, c.video_codec || "unknown"),
+				h("td", { className: "text-right" }, (c.count || 0).toLocaleString()),
+				h("td", { className: "text-right saved" }, fmtBytesDiff(c.predicted_savings || 0)),
+			),
+		);
+	});
+	table.appendChild(thead);
+	table.appendChild(tbody);
+	container.appendChild(table);
+}
+
+function renderScanMediaTypeBar(ss) {
+	const container = $("#scanMediaTypeBar");
+	empty(container);
+
+	// Use counts for the stacked bar
+	const totalFiles = ss.total_files || 1;
+	const completedFiles = ss.total_files - ss.candidates - ss.already_optimal || 0;
+	const pendingFiles = ss.candidates || 0;
+	const optimalFiles = ss.already_optimal || 0;
+	const failedFiles = ss.total_files - completedFiles - pendingFiles - optimalFiles;
+
+	const segments = [
+		{ label: "Completed", count: Math.max(0, completedFiles), color: "#10b981" },
+		{ label: "Pending", count: Math.max(0, pendingFiles), color: "#3b82f6" },
+		{ label: "Already Optimal", count: Math.max(0, optimalFiles), color: "#6b7280" },
+		{ label: "Failed", count: Math.max(0, failedFiles), color: "#ef4444" },
+	];
+
+	const bar = h("div", { className: "stacked-bar" });
+	segments.forEach((seg) => {
+		if (seg.count === 0) return;
+		const pct = ((seg.count / totalFiles) * 100).toFixed(1);
+		bar.appendChild(
+			h("div", {
+				className: "stacked-bar-seg",
+				style: `width:${pct}%;background:${seg.color};`,
+				title: `${seg.label}: ${seg.count.toLocaleString()} (${pct}%)`,
+			},
+				h("span", { className: "stacked-bar-label" }, `${seg.count.toLocaleString()}`),
+			),
+		);
+	});
+
+	const legend = h("div", { className: "stacked-bar-legend" });
+	segments.forEach((seg) => {
+		if (seg.count === 0) return;
+		legend.appendChild(
+			h("span", { className: "stacked-bar-legend-item" },
+				h("span", { className: "legend-dot", style: `background:${seg.color};` }),
+				` ${seg.label} (${seg.count.toLocaleString()})`,
+			),
+		);
+	});
+
+	container.appendChild(bar);
+	container.appendChild(legend);
+}
+
+/* ---------- Dashboard Charts ---------- */
+function renderDashboardCharts(report) {
+	const byMediaType = report.by_media_type || {};
+	const byShow = (report.by_show || []).slice(0, 5);
+
+	// Media type doughnut
+	const ctxMedia = $("#chartDashMediaType")?.getContext("2d");
+	if (ctxMedia) {
+		if (charts.dashMediaType) charts.dashMediaType.destroy();
+		const mtData = [
+			byMediaType.tv_shows?.count || 0,
+			byMediaType.movies?.count || 0,
+			byMediaType.other?.count || 0,
+		];
+		const hasData = mtData.some((v) => v > 0);
+		setChartEmpty("#chartDashMediaType", !hasData, "No media type data.");
+		if (hasData) {
+			charts.dashMediaType = new Chart(ctxMedia, {
+				type: "doughnut",
+				data: {
+					labels: ["TV Shows", "Movies", "Other"],
+					datasets: [{
+						data: mtData,
+						backgroundColor: ["#3b82f6", "#10b981", "#6b7280"],
+						borderWidth: 0,
+						hoverOffset: 6,
+					}],
+				},
+				options: {
+					responsive: true,
+					maintainAspectRatio: false,
+					cutout: "65%",
+					plugins: {
+						legend: {
+							position: "bottom",
+							labels: { color: "#9aa3b2", font: { size: 12 }, padding: 16 },
+						},
+						tooltip: {
+							backgroundColor: "#151921",
+							borderColor: "rgba(255,255,255,0.09)",
+							borderWidth: 1,
+							titleColor: "#f0f2f5",
+							bodyColor: "#9aa3b2",
+							padding: 12,
+							cornerRadius: 10,
+						},
+					},
+				},
+			});
+		}
+	}
+
+	// Top 5 shows horizontal bar
+	const ctxShows = $("#chartDashTopShows")?.getContext("2d");
+	if (ctxShows) {
+		if (charts.dashTopShows) charts.dashTopShows.destroy();
+		if (byShow.length === 0) {
+			setChartEmpty("#chartDashTopShows", true, "No show data available.");
+		} else {
+			setChartEmpty("#chartDashTopShows", false);
+			charts.dashTopShows = new Chart(ctxShows, {
+				type: "bar",
+				data: {
+					labels: byShow.map((s) => (s.name || "Unknown").substring(0, 20)),
+					datasets: [{
+						label: "Predicted Savings (GB)",
+						data: byShow.map((s) => Math.round(((s.predicted_savings || 0) / 1024 ** 3) * 10) / 10),
+						backgroundColor: "#3b82f6",
+						borderRadius: 6,
+						borderSkipped: false,
+					}],
+				},
+				options: {
+					indexAxis: "y",
+					responsive: true,
+					maintainAspectRatio: false,
+					scales: {
+						x: {
+							ticks: { color: "#9aa3b2", font: { size: 11 } },
+							grid: { color: "rgba(255,255,255,0.04)" },
+						},
+						y: {
+							ticks: { color: "#9aa3b2", font: { size: 11 } },
+							grid: { display: false },
+						},
+					},
+					plugins: {
+						legend: { display: false },
+						tooltip: {
+							backgroundColor: "#151921",
+							borderColor: "rgba(255,255,255,0.09)",
+							borderWidth: 1,
+							titleColor: "#f0f2f5",
+							bodyColor: "#9aa3b2",
+							padding: 12,
+							cornerRadius: 10,
+						},
+					},
+				},
+			});
+		}
+	}
 }
 
 function emptyRow(message, cols) {
@@ -629,7 +1113,7 @@ async function loadQueue() {
 		empty(tbody);
 		const queue = data.queue || [];
 		if (queue.length === 0) {
-			tbody.appendChild(emptyRow("Queue is empty. Run a scan to populate.", 5));
+			tbody.appendChild(emptyRow("Queue is empty. Run a scan to populate.", 6));
 		}
 		queue.forEach((f) => {
 			tbody.appendChild(
@@ -645,6 +1129,7 @@ async function loadQueue() {
 						{ className: "saved" },
 						`-${fmtBytes(f.predicted_savings_bytes || 0)}`,
 					),
+					h("td", { className: `status ${f.status || "pending"}` }, f.status || "pending"),
 				),
 			);
 		});
@@ -1119,6 +1604,21 @@ $("#btnResetFailed")?.addEventListener("click", () =>
 $("#btnResetFailedInline")?.addEventListener("click", () =>
 	action("/reset-failed", {}, "Reset all failed entries to pending?"),
 );
+$("#btnScanReport")?.addEventListener("click", openScanModal);
+$("#btnCloseScanModal")?.addEventListener("click", closeScanModal);
+$("#btnCloseScanModal2")?.addEventListener("click", closeScanModal);
+$("#btnTranscodeTop10")?.addEventListener("click", () => {
+	closeScanModal();
+	action("/transcode", { limit: 10, force: false }, "Transcode top 10 candidates?");
+});
+$("#btnTranscodeAllPending")?.addEventListener("click", () => {
+	closeScanModal();
+	action("/transcode", { force: false }, "Transcode all pending files?");
+});
+// Close modal on overlay click
+$("#scanReportModal")?.addEventListener("click", (e) => {
+	if (e.target === $("#scanReportModal")) closeScanModal();
+});
 
 /* ---------- SSE ---------- */
 function connectEvents() {
@@ -1144,9 +1644,15 @@ function connectEvents() {
 					$("#currentFile").textContent = msg.data.message || "Working...";
 					$("#currentFile").classList.remove("pulse");
 				}
-			} else if (msg.type === "finished") {
-				toast(msg.data.message, msg.data.ok ? "ok" : "err");
-				loadStatus();
+		} else if (msg.type === "finished") {
+			toast(msg.data.message, msg.data.ok ? "ok" : "err");
+			loadStatus();
+			// Auto-open scan report modal when a scan job finishes
+			if (msg.data.message && msg.data.message.toLowerCase().includes("scan")) {
+				setTimeout(() => {
+					loadScanReport().then(() => openScanModal());
+				}, 1000);
+			}
 			} else if (msg.type === "log") {
 				if (currentView === "logs") {
 					const term = $("#logTerminal");

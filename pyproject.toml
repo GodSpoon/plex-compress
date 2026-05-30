@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plex-compress"
+version = "0.2.0-containerized"
+description = "Transcode Plex libraries to space-efficient HEVC with stereo audio. Container-ready with NVIDIA NVENC and Apple Silicon support."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "GodSpoon", email = "you@example.com" }]
+keywords = ["plex", "transcode", "hevc", "nvenc", "videotoolbox", "ffmpeg"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Video :: Conversion",
+]
+
+[project.scripts]
+plex-compress = "plex_compress.cli:main"
+plex-compress-webui = "plex_compress.webui.server:main"
+
+[project.urls]
+Homepage = "https://github.com/GodSpoon/plex-compress"
+Issues = "https://github.com/GodSpoon/plex-compress/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["plex_compress*"]

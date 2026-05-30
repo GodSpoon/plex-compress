@@ -6,6 +6,7 @@
     <title>Plex Compress</title>
     <link rel="stylesheet" href="/static/style.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@2.3.0/dist/chartjs-chart-treemap.min.js"></script>
   </head>
   <body>
     <!-- Mobile Toggle -->
@@ -92,6 +93,9 @@
               <button class="btn outline" id="btnHealthCheck">
                 Health Check
               </button>
+              <button class="btn outline" id="btnScanReport">
+                View Scan Report
+              </button>
               <button class="btn outline" id="btnDryRun">Dry Run</button>
               <button class="btn secondary" id="btnScan">Scan</button>
               <button class="btn primary" id="btnTranscode">Transcode</button>
@@ -145,6 +149,26 @@
               <div class="value saved" id="statSessionSaved">—</div>
               <div class="sub" id="statSessionSavedSub"></div>
             </div>
+            <div class="stat-card accent">
+              <div class="label">Projected Savings</div>
+              <div class="value saved" id="statProjectedSavings">—</div>
+              <div class="sub" id="statProjectedSavingsSub">from pending files</div>
+            </div>
+            <div class="stat-card info">
+              <div class="label">Velocity</div>
+              <div class="value info" id="statVelocity">—</div>
+              <div class="sub" id="statVelocitySub">GB per hour</div>
+            </div>
+            <div class="stat-card warn">
+              <div class="label">Time Spent</div>
+              <div class="value warn" id="statTimeSpent">—</div>
+              <div class="sub" id="statTimeSpentSub">total transcode hours</div>
+            </div>
+            <div class="stat-card info">
+              <div class="label">ETA</div>
+              <div class="value info" id="statETA">—</div>
+              <div class="sub" id="statETASub">to complete all pending</div>
+            </div>
           </div>
 
           <div class="card progress-section">
@@ -179,6 +203,27 @@
                 ></span>
                 <span id="legendPending">0 remaining</span></span
               >
+            </div>
+            <div class="progress-savings-line text-sm text-muted mt-3" id="progressSavingsLine">
+              Actual: — · Projected: — · Total potential: —
+            </div>
+          </div>
+
+          <div class="card library-overview-card">
+            <div class="card-header">
+              <h3>Library Overview</h3>
+            </div>
+            <div class="chart-row">
+              <div class="chart-col">
+                <div class="chart-container" style="height:220px;">
+                  <canvas id="chartDashMediaType"></canvas>
+                </div>
+              </div>
+              <div class="chart-col">
+                <div class="chart-container" style="height:220px;">
+                  <canvas id="chartDashTopShows"></canvas>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -257,6 +302,7 @@
                     <th>Resolution</th>
                     <th>Size</th>
                     <th>Predicted Savings</th>
+                    <th>Status</th>
                   </tr>
                 </thead>
                 <tbody id="queueTable"></tbody>
@@ -653,6 +699,74 @@
           </div>
         </section>
       </main>
+    </div>
+
+    <!-- Scan Report Modal -->
+    <div class="scan-modal-overlay" id="scanReportModal" style="display:none;">
+      <div class="scan-modal">
+        <div class="scan-modal-header">
+          <h2>Scan Report</h2>
+          <button class="btn ghost icon" id="btnCloseScanModal" aria-label="Close">✕</button>
+        </div>
+
+        <div class="scan-hero">
+          <div class="scan-hero-number" id="scanHeroNumber">—</div>
+          <div class="scan-hero-label">GB will be saved</div>
+          <div class="scan-hero-sub" id="scanHeroSub">That's —% of your — TB library</div>
+          <div class="scan-hero-sub2" id="scanHeroSub2">— files remaining out of — total</div>
+        </div>
+
+        <div class="scan-stats-grid">
+          <div class="scan-stat-mini">
+            <div class="scan-stat-label">Current Library Size</div>
+            <div class="scan-stat-value" id="scanStatLibrarySize">—</div>
+          </div>
+          <div class="scan-stat-mini">
+            <div class="scan-stat-label">Pending to Transcode</div>
+            <div class="scan-stat-value" id="scanStatPendingSize">—</div>
+          </div>
+          <div class="scan-stat-mini">
+            <div class="scan-stat-label">Already Saved</div>
+            <div class="scan-stat-value" id="scanStatSavedSoFar">—</div>
+          </div>
+          <div class="scan-stat-mini">
+            <div class="scan-stat-label">Already Optimal</div>
+            <div class="scan-stat-value" id="scanStatOptimal">—</div>
+          </div>
+        </div>
+
+        <div class="scan-chart-grid">
+          <div class="scan-chart-box">
+            <div class="card-header"><h3>Library Composition</h3></div>
+            <div class="chart-container" style="height:260px;">
+              <canvas id="chartScanTreemap"></canvas>
+            </div>
+          </div>
+          <div class="scan-chart-box">
+            <div class="card-header"><h3>Top 10 Shows by Pending Savings</h3></div>
+            <div class="chart-container" style="height:260px;">
+              <canvas id="chartScanTopShows"></canvas>
+            </div>
+          </div>
+          <div class="scan-chart-box">
+            <div class="card-header"><h3>Codec Breakdown</h3></div>
+            <div class="chart-container" style="height:260px;">
+              <canvas id="chartScanCodec"></canvas>
+            </div>
+            <div class="scan-codec-table" id="scanCodecTable"></div>
+          </div>
+          <div class="scan-chart-box">
+            <div class="card-header"><h3>Library Composition</h3></div>
+            <div class="stacked-bar-wrap" id="scanMediaTypeBar"></div>
+          </div>
+        </div>
+
+        <div class="scan-action-bar">
+          <button class="btn outline" id="btnCloseScanModal2">Close</button>
+          <button class="btn secondary" id="btnTranscodeTop10">Transcode Top 10</button>
+          <button class="btn primary" id="btnTranscodeAllPending">Transcode All Pending</button>
+        </div>
+      </div>
     </div>
 
     <!-- Toast Container -->

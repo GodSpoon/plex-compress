@@ -3,8 +3,8 @@
   "files": {
     "plex_compress/webui/static/app.js": {
       "latest": {
-        "commit": "e17fa87",
-        "timestamp": "2026-05-30T00:46:16.448Z",
+        "commit": "8aa4cab",
+        "timestamp": "2026-05-30T04:35:16.677Z",
         "mi": 2.7,
         "cognitive": 389,
         "nesting": 7,
@@ -52,10 +52,20 @@
           "lines": 1109,
           "maxCyclomatic": 137,
           "entropy": 6.46
+        },
+        {
+          "commit": "8aa4cab",
+          "timestamp": "2026-05-30T04:35:16.677Z",
+          "mi": 2.7,
+          "cognitive": 389,
+          "nesting": 7,
+          "lines": 1109,
+          "maxCyclomatic": 137,
+          "entropy": 6.46
         }
       ],
       "trend": "regressing"
     }
   },
-  "capturedAt": "2026-05-30T00:46:21.449Z"
+  "capturedAt": "2026-05-30T04:35:21.679Z"
 }

@@ -120,6 +120,7 @@ class WebUIApp:
             ("POST", "/api/stop", self._api_stop),
             ("POST", "/api/reset-failed", self._api_reset_failed),
             ("GET", "/api/extensions", self._api_extensions),
+            ("GET", "/api/scan-report", self._api_scan_report),
             ("GET", "/static/", self._serve_static),
         ]
 
@@ -411,6 +412,28 @@ class WebUIApp:
 
     def _api_extensions(self, handler, path, match):
         handler._send_json({"extensions": self.extensions.extensions})
+
+    def _api_scan_report(self, handler, path, match):
+        state = self._state_db()
+        summary = state.get_scan_summary()
+        by_media_type = state.get_media_type_breakdown()
+        by_codec = state.get_pending_by_codec()
+        by_resolution = state.get_pending_by_resolution()
+        by_show = state.get_pending_by_show(limit=20)
+        velocity = state.get_transcoding_velocity()
+        time_stats = state.get_time_stats()
+        eta = state.get_eta(velocity.get("gb_per_hour", 0.0))
+
+        handler._send_json({
+            "scan_summary": summary,
+            "by_media_type": by_media_type,
+            "by_codec": by_codec,
+            "by_resolution": by_resolution,
+            "by_show": by_show,
+            "velocity": velocity,
+            "time_stats": time_stats,
+            "eta": eta,
+        })
 
 
 # ------------------------------------------------------------------

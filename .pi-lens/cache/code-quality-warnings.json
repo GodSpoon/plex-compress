@@ -1,38 +1,15 @@
 {
-  "generatedAt": "2026-05-30T03:55:33.875Z",
+  "generatedAt": "2026-05-30T05:30:10.777Z",
   "scope": "turn_delta",
-  "sessionId": "lens-mprhbhml-c5cad5f5",
-  "turnIndex": 169,
-  "projectSeqStart": 36,
-  "projectSeqEnd": 37,
+  "sessionId": "lens-mprwo05o-41ccdbdb",
+  "turnIndex": 9,
+  "projectSeqStart": 66,
+  "projectSeqEnd": 67,
   "deltaOnly": true,
-  "files": [
-    {
-      "filePath": "/Users/sking/SPOON_GIT/plex-compress/progress.md",
-      "displayPath": "progress.md",
-      "fileSeq": 1,
-      "warnings": [
-        {
-          "id": "cq:a8755dd078",
-          "filePath": "/Users/sking/SPOON_GIT/plex-compress/progress.md",
-          "displayPath": "progress.md",
-          "severity": "warning",
-          "tool": "pi-lens",
-          "message": "Pi-lens analysis unavailable. Tools for markdown not installed.",
-          "category": "other",
-          "origin": "dispatch"
-        }
-      ]
-    }
-  ],
+  "files": [],
   "summary": {
-    "warnings": 1,
-    "files": 1,
-    "topRules": [
-      {
-        "rule": "pi-lens",
-        "count": 1
-      }
-    ]
+    "warnings": 0,
+    "files": 0,
+    "topRules": []
   }
 }
