@@ -1,0 +1,1069 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Plex Compress</title>
+    <style>
+      :root {
+        --bg: #0d0f12;
+        --bg2: #14171c;
+        --bg3: #1a1e24;
+        --fg: #e4e6eb;
+        --fg2: #8b92a8;
+        --accent: #4ade80;
+        --accent2: #22c55e;
+        --warn: #f59e0b;
+        --err: #ef4444;
+        --info: #3b82f6;
+        --border: #252a33;
+        --radius: 8px;
+        --font:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+          Arial, sans-serif;
+        --mono: "SF Mono", Monaco, "Cascadia Code", Consolas, monospace;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html,
+      body {
+        background: var(--bg);
+        color: var(--fg);
+        font-family: var(--font);
+        font-size: 14px;
+        line-height: 1.45;
+      }
+      a {
+        color: var(--info);
+        text-decoration: none;
+      }
+      button {
+        font-family: inherit;
+        cursor: pointer;
+        border: none;
+        background: none;
+        color: inherit;
+      }
+      .container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 16px;
+      }
+
+      /* Header */
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding-bottom: 14px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 16px;
+      }
+      header h1 {
+        font-size: 1.25rem;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      header h1 .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--accent);
+        display: inline-block;
+      }
+      header h1 .dot.idle {
+        background: var(--fg2);
+        animation: none;
+      }
+      header h1 .dot.error {
+        background: var(--err);
+        animation: none;
+      }
+      header .subtitle {
+        color: var(--fg2);
+        font-size: 0.8rem;
+      }
+      .controls {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .btn {
+        padding: 6px 12px;
+        border-radius: var(--radius);
+        font-size: 0.8rem;
+        font-weight: 600;
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        color: var(--fg);
+        transition: background 0.1s;
+      }
+      .btn:hover {
+        background: #22262e;
+      }
+      .btn.primary {
+        background: var(--accent2);
+        color: #052e16;
+        border-color: var(--accent2);
+      }
+      .btn.primary:hover {
+        background: var(--accent);
+      }
+      .btn.danger {
+        color: var(--err);
+        border-color: rgba(239, 68, 68, 0.3);
+      }
+      .btn.danger:hover {
+        background: rgba(239, 68, 68, 0.08);
+      }
+      .btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      /* Stats */
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+      .stat {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 12px 14px;
+      }
+      .stat .label {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--fg2);
+        margin-bottom: 4px;
+      }
+      .stat .value {
+        font-size: 1.4rem;
+        font-weight: 700;
+      }
+      .stat .value.saved {
+        color: var(--accent);
+      }
+      .stat .value.failed {
+        color: var(--err);
+      }
+      .stat .value.warn {
+        color: var(--warn);
+      }
+      .stat .sub {
+        font-size: 0.75rem;
+        color: var(--fg2);
+        margin-top: 3px;
+      }
+
+      /* Progress */
+      .progress-box {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 12px 14px;
+        margin-bottom: 16px;
+      }
+      .progress-box h2 {
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin-bottom: 8px;
+        color: var(--fg2);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .progress-track {
+        background: var(--bg);
+        border-radius: 999px;
+        height: 22px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+      }
+      .progress-fill {
+        height: 100%;
+        border-radius: 999px;
+        background: var(--accent2);
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        padding-right: 8px;
+        min-width: 36px;
+        transition: width 0.4s ease;
+      }
+      .progress-fill span {
+        font-size: 0.7rem;
+        font-weight: 700;
+        color: #052e16;
+      }
+      .progress-meta {
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+        font-size: 0.75rem;
+        color: var(--fg2);
+      }
+
+      /* Current */
+      .current {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 12px 14px;
+        margin-bottom: 16px;
+      }
+      .current h2 {
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin-bottom: 6px;
+        color: var(--fg2);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .current .file {
+        font-family: var(--mono);
+        font-size: 0.8rem;
+        background: var(--bg);
+        padding: 8px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        color: var(--info);
+        word-break: break-all;
+      }
+      .current .meta {
+        font-size: 0.8rem;
+        color: var(--fg2);
+        margin-top: 4px;
+      }
+
+      /* Tabs */
+      .tabs {
+        display: flex;
+        gap: 2px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 12px;
+        overflow-x: auto;
+      }
+      .tab {
+        padding: 8px 14px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--fg2);
+        border-bottom: 2px solid transparent;
+        white-space: nowrap;
+      }
+      .tab:hover {
+        color: var(--fg);
+      }
+      .tab.active {
+        color: var(--fg);
+        border-bottom-color: var(--accent2);
+      }
+
+      /* Panels */
+      .panel {
+        display: none;
+      }
+      .panel.active {
+        display: block;
+      }
+      .panel h2 {
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin-bottom: 8px;
+        color: var(--fg2);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      /* Tables */
+      .table-wrap {
+        overflow-x: auto;
+        max-height: 520px;
+        overflow-y: auto;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.8rem;
+      }
+      th,
+      td {
+        padding: 8px 10px;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+      }
+      th {
+        color: var(--fg2);
+        font-weight: 600;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        background: var(--bg3);
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      tr:last-child td {
+        border-bottom: none;
+      }
+      td {
+        color: var(--fg);
+        max-width: 360px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      td.mono {
+        font-family: var(--mono);
+        color: var(--fg2);
+      }
+      td.saved {
+        color: var(--accent);
+        font-weight: 600;
+      }
+      td.status {
+        font-weight: 600;
+      }
+      td.status.completed {
+        color: var(--accent);
+      }
+      td.status.failed {
+        color: var(--err);
+      }
+      td.status.in_progress {
+        color: var(--info);
+      }
+
+      /* Shows grid */
+      .shows {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        gap: 10px;
+      }
+      .show {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 12px;
+      }
+      .show .name {
+        font-weight: 600;
+        font-size: 0.85rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-bottom: 2px;
+      }
+      .show .meta {
+        font-size: 0.75rem;
+        color: var(--fg2);
+        margin-bottom: 6px;
+      }
+      .show .bar {
+        background: var(--bg);
+        border-radius: 999px;
+        height: 5px;
+        overflow: hidden;
+      }
+      .show .bar > div {
+        height: 100%;
+        border-radius: 999px;
+        background: var(--accent2);
+        transition: width 0.3s ease;
+      }
+
+      /* Logs */
+      .log-box {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 10px;
+        font-family: var(--mono);
+        font-size: 0.75rem;
+        line-height: 1.5;
+        max-height: 520px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        color: var(--fg2);
+      }
+
+      /* Config */
+      .config-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 10px;
+      }
+      .config-item {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 10px 12px;
+      }
+      .config-item .key {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--fg2);
+        margin-bottom: 2px;
+      }
+      .config-item .val {
+        font-family: var(--mono);
+        font-size: 0.8rem;
+        color: var(--fg);
+        word-break: break-all;
+      }
+
+      /* Empty */
+      .empty {
+        color: var(--fg2);
+        font-size: 0.85rem;
+        padding: 20px;
+        text-align: center;
+      }
+
+      /* Footer */
+      footer {
+        text-align: center;
+        color: var(--fg2);
+        font-size: 0.75rem;
+        padding: 20px 0 10px;
+      }
+
+      /* Mobile */
+      @media (max-width: 640px) {
+        header h1 {
+          font-size: 1.05rem;
+        }
+        .stats {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .stat .value {
+          font-size: 1.15rem;
+        }
+        th,
+        td {
+          padding: 6px 8px;
+          font-size: 0.75rem;
+        }
+        .shows {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div>
+          <h1><span class="dot" id="statusDot"></span> Plex Compress</h1>
+          <div class="subtitle" id="subtitle">Loading...</div>
+        </div>
+        <div class="controls">
+          <button
+            class="btn"
+            id="btnScan"
+            onclick="doScan()"
+            title="Incremental: only probe new/changed files (fast)"
+          >
+            Scan
+          </button>
+          <button
+            class="btn"
+            id="btnFullScan"
+            onclick="doFullScan()"
+            title="Re-probe every file except already-transcoded ones"
+          >
+            Full Scan
+          </button>
+          <button class="btn primary" id="btnTranscode" onclick="doTranscode()">
+            Transcode
+          </button>
+          <button class="btn" id="btnHealth" onclick="doHealth()">
+            Health
+          </button>
+          <button class="btn danger" id="btnStop" onclick="doStop()" disabled>
+            Stop
+          </button>
+          <button class="btn" id="btnReset" onclick="doReset()">
+            Reset Failed
+          </button>
+        </div>
+      </header>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="label">Completed</div>
+          <div class="value" id="sCompleted">—</div>
+        </div>
+        <div class="stat">
+          <div class="label">Failed</div>
+          <div class="value failed" id="sFailed">—</div>
+        </div>
+        <div class="stat">
+          <div class="label">Pending</div>
+          <div class="value warn" id="sPending">—</div>
+        </div>
+        <div class="stat">
+          <div class="label">In Progress</div>
+          <div class="value" id="sInProgress">—</div>
+        </div>
+        <div class="stat">
+          <div class="label">Space Saved</div>
+          <div class="value saved" id="sSaved">—</div>
+        </div>
+        <div class="stat">
+          <div class="label">Session Saved</div>
+          <div class="value saved" id="sSessionSaved">—</div>
+          <div class="sub" id="sSessionSub"></div>
+        </div>
+      </div>
+
+      <div class="progress-box">
+        <h2>Overall Progress</h2>
+        <div class="progress-track">
+          <div class="progress-fill" id="pBar" style="width: 0%">
+            <span id="pText">0%</span>
+          </div>
+        </div>
+        <div class="progress-meta">
+          <span id="mDone">0 done</span>
+          <span id="mFail">0 failed</span>
+          <span id="mRem">0 remaining</span>
+        </div>
+      </div>
+
+      <div class="current">
+        <h2>Current Activity</h2>
+        <div class="file" id="cFile">Idle</div>
+        <div class="meta" id="cMeta"></div>
+      </div>
+
+      <div class="tabs">
+        <button
+          class="tab active"
+          data-tab="queue"
+          onclick="switchTab('queue')"
+        >
+          Queue
+        </button>
+        <button class="tab" data-tab="recent" onclick="switchTab('recent')">
+          Recent
+        </button>
+        <button class="tab" data-tab="failed" onclick="switchTab('failed')">
+          Failed
+        </button>
+        <button class="tab" data-tab="shows" onclick="switchTab('shows')">
+          Shows
+        </button>
+        <button class="tab" data-tab="report" onclick="switchTab('report')">
+          Report
+        </button>
+        <button class="tab" data-tab="logs" onclick="switchTab('logs')">
+          Logs
+        </button>
+        <button class="tab" data-tab="config" onclick="switchTab('config')">
+          Config
+        </button>
+      </div>
+
+      <div class="panel active" id="panel-queue">
+        <h2>
+          Queue
+          <span id="qCount" style="color: var(--fg2); font-weight: 400"></span>
+        </h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>File</th>
+                <th>Status</th>
+                <th>Size</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody id="tQueue"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel" id="panel-recent">
+        <h2>Recent Transcodes</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>File</th>
+                <th>Original</th>
+                <th>Output</th>
+                <th>Saved</th>
+              </tr>
+            </thead>
+            <tbody id="tRecent"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel" id="panel-failed">
+        <h2>Failed Files</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>File</th>
+                <th>Reason</th>
+                <th>Errors</th>
+              </tr>
+            </thead>
+            <tbody id="tFailed"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel" id="panel-shows">
+        <h2>Shows Breakdown</h2>
+        <div class="shows" id="gShows"></div>
+      </div>
+
+      <div class="panel" id="panel-report">
+        <h2>Report</h2>
+        <div id="rContent"></div>
+      </div>
+
+      <div class="panel" id="panel-logs">
+        <h2>Logs</h2>
+        <div class="log-box" id="lBox">Loading...</div>
+      </div>
+
+      <div class="panel" id="panel-config">
+        <h2>Configuration</h2>
+        <div class="config-grid" id="gConfig"></div>
+      </div>
+
+      <footer>Auto-refreshes every 5s · <span id="lastUp">—</span></footer>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      function fmtB(b) {
+        if (!b) return "0 B";
+        const k = 1024,
+          s = ["B", "KB", "MB", "GB", "TB"],
+          i = Math.floor(Math.log(b) / Math.log(k));
+        return parseFloat((b / Math.pow(k, i)).toFixed(1)) + " " + s[i];
+      }
+      function fmtBD(b) {
+        const g = b / 1024 ** 3,
+          m = b / 1024 ** 2;
+        if (g >= 1) return g.toFixed(2) + " GB";
+        if (m >= 1) return m.toFixed(0) + " MB";
+        return b + " B";
+      }
+      function bn(p) {
+        return p.split("/").pop();
+      }
+      function sn(p) {
+        const parts = p.split("/");
+        const idx = parts.findIndex((x) => /\{tmdb-|\{tvdb-/.test(x));
+        return idx >= 0 ? parts[idx] : parts[parts.length - 2] || bn(p);
+      }
+
+      let es = null,
+        esRetry = 1;
+      function openEvents() {
+        if (es) {
+          try {
+            es.close();
+          } catch (e) {}
+        }
+        es = new EventSource("/api/events");
+        es.onmessage = (e) => {
+          try {
+            const d = JSON.parse(e.data);
+            if (
+              d.type === "progress" ||
+              d.type === "scan_complete" ||
+              d.type === "transcode_complete" ||
+              d.type === "health_check_complete"
+            ) {
+              fetchStatus();
+            }
+          } catch (err) {}
+        };
+        es.onerror = () => {
+          es.close();
+          es = null;
+          setTimeout(openEvents, Math.min(esRetry * 1000, 30000));
+          esRetry++;
+        };
+        es.onopen = () => {
+          esRetry = 1;
+        };
+      }
+
+      async function getJSON(url) {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(r.statusText);
+        return r.json();
+      }
+      async function postJSON(url, body = {}) {
+        const r = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        return r.json();
+      }
+
+      async function fetchStatus() {
+        try {
+          const d = await getJSON("/api/status");
+          render(d);
+          $("statusDot").className = "dot";
+        } catch (e) {
+          $("subtitle").textContent = "Cannot reach API — " + e.message;
+          $("statusDot").className = "dot error";
+        }
+      }
+
+      async function fetchQueue() {
+        try {
+          const d = await getJSON("/api/queue");
+          renderQueue(d.queue);
+        } catch (e) {
+          $("tQueue").innerHTML =
+            `<tr><td colspan="4" class="empty">Error loading queue</td></tr>`;
+        }
+      }
+      async function fetchReport() {
+        try {
+          const d = await getJSON("/api/report");
+          renderReport(d);
+        } catch (e) {
+          $("rContent").innerHTML =
+            `<div class="empty">Error loading report</div>`;
+        }
+      }
+      async function fetchLogs() {
+        try {
+          const d = await getJSON("/api/logs?limit=200");
+          $("lBox").textContent = d.logs.length
+            ? d.logs.join("\n")
+            : "No logs.";
+        } catch (e) {
+          $("lBox").textContent = "Error loading logs.";
+        }
+      }
+      async function fetchConfig() {
+        try {
+          const d = await getJSON("/api/config");
+          renderConfig(d);
+        } catch (e) {
+          $("gConfig").innerHTML =
+            `<div class="empty">Error loading config</div>`;
+        }
+      }
+
+      function render(d) {
+        const s = d.stats,
+          total = s.total,
+          completed = s.completed,
+          failed = s.failed,
+          pending = total - completed - failed - s.in_progress;
+        $("sCompleted").textContent = completed;
+        $("sFailed").textContent = failed;
+        $("sPending").textContent = pending;
+        $("sInProgress").textContent = s.in_progress;
+        $("sSaved").textContent = fmtBD(s.saved_bytes);
+        const sess = d.session || { files: 0, saved_bytes: 0 };
+        $("sSessionSaved").textContent = fmtBD(sess.saved_bytes);
+        $("sSessionSub").textContent = sess.files + " files this session";
+        const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+        $("pBar").style.width = pct + "%";
+        $("pText").textContent = pct + "%";
+        $("mDone").textContent = completed + " done";
+        $("mFail").textContent = failed + " failed";
+        $("mRem").textContent = pending + s.in_progress + " remaining";
+
+        const run = d.currently_running,
+          r = d.runner || {};
+        const hasJob = r.has_job;
+        if (run && hasJob) {
+          $("cFile").textContent = bn(run.path);
+          $("cMeta").textContent = sn(run.path);
+          $("statusDot").style.background = "var(--accent)";
+        } else if (!hasJob && completed === 0 && total === 0) {
+          $("cFile").textContent = "Waiting for first scan...";
+          $("cMeta").textContent = "";
+          $("statusDot").style.background = "var(--fg2)";
+        } else if (hasJob && r.progress && r.progress.message) {
+          $("cFile").textContent = r.progress.message;
+          $("cMeta").textContent = r.progress.current + "/" + r.progress.total;
+          $("statusDot").style.background = "var(--accent)";
+        } else {
+          $("cFile").textContent = "Idle";
+          $("cMeta").textContent = "";
+          $("statusDot").style.background = "var(--fg2)";
+        }
+
+        $("btnScan").disabled = hasJob;
+        $("btnFullScan").disabled = hasJob;
+        $("btnTranscode").disabled = hasJob;
+        $("btnHealth").disabled = hasJob;
+        $("btnStop").disabled = !hasJob;
+        $("btnReset").disabled = hasJob;
+
+        $("subtitle").textContent =
+          total +
+          " files tracked" +
+          (d.shows.length ? " across " + d.shows.length + " shows" : "");
+        renderRecent(d.recent);
+        renderFailed(d.failed);
+        renderShows(d.shows);
+        $("lastUp").textContent = new Date().toLocaleTimeString();
+      }
+
+      function renderRecent(rows) {
+        const tb = $("tRecent");
+        tb.innerHTML = "";
+        if (!rows.length) {
+          tb.innerHTML = `<tr><td colspan="4" class="empty">No completed files yet.</td></tr>`;
+          return;
+        }
+        rows.forEach((r) => {
+          const saved = (r.original_size || 0) - (r.output_size || 0);
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td title="${r.path}">${bn(r.path)}</td><td class="mono">${fmtB(r.original_size || 0)}</td><td class="mono">${fmtB(r.output_size || 0)}</td><td class="saved">${saved > 0 ? "-" + fmtB(saved) : "—"}</td>`;
+          tb.appendChild(tr);
+        });
+      }
+
+      function renderFailed(rows) {
+        const tb = $("tFailed");
+        tb.innerHTML = "";
+        if (!rows.length) {
+          tb.innerHTML = `<tr><td colspan="3" class="empty">No failures.</td></tr>`;
+          return;
+        }
+        rows.forEach((r) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td title="${r.path}">${bn(r.path)}</td><td title="${r.reason || ""}" style="color:var(--err);font-size:0.75rem;max-width:300px">${(r.reason || "").substring(0, 90)}</td><td class="mono">${r.error_count || 0}</td>`;
+          tb.appendChild(tr);
+        });
+      }
+
+      function renderShows(shows) {
+        const g = $("gShows");
+        g.innerHTML = "";
+        if (!shows.length) {
+          g.innerHTML = `<div class="empty">No data.</div>`;
+          return;
+        }
+        shows.forEach((s) => {
+          const pct =
+            s.total > 0 ? Math.round((s.completed / s.total) * 100) : 0;
+          const d = document.createElement("div");
+          d.className = "show";
+          d.innerHTML = `<div class="name" title="${s.name}">${s.name}</div><div class="meta">${s.completed}/${s.total} done · ${fmtBD(s.saved)} saved</div><div class="bar"><div style="width:${pct}%"></div></div>`;
+          g.appendChild(d);
+        });
+      }
+
+      function renderQueue(rows) {
+        const tb = $("tQueue");
+        tb.innerHTML = "";
+        $("qCount").textContent = rows.length ? "(" + rows.length + ")" : "";
+        if (!rows.length) {
+          tb.innerHTML = `<tr><td colspan="4" class="empty">Queue empty.</td></tr>`;
+          return;
+        }
+        rows.forEach((r) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td title="${r.path}">${bn(r.path)}</td><td class="status ${r.status}">${r.status}</td><td class="mono">${fmtB(r.original_size || 0)}</td><td style="color:var(--fg2);font-size:0.75rem">${r.reason || "—"}</td>`;
+          tb.appendChild(tr);
+        });
+      }
+
+      function renderReport(d) {
+        const box = $("rContent");
+        let html = "";
+        const sm = d.summary || {};
+        html += `<div class="stats" style="margin-bottom:12px">`;
+        html += `<div class="stat"><div class="label">Total</div><div class="value">${sm.total || 0}</div></div>`;
+        html += `<div class="stat"><div class="label">Completed</div><div class="value saved">${sm.completed || 0}</div></div>`;
+        html += `<div class="stat"><div class="label">Failed</div><div class="value failed">${sm.failed || 0}</div></div>`;
+        html += `<div class="stat"><div class="label">Pending</div><div class="value warn">${sm.pending || 0}</div></div>`;
+        html += `<div class="stat"><div class="label">Unreadable</div><div class="value failed">${sm.unreadable || 0}</div></div>`;
+        html += `<div class="stat"><div class="label">Saved</div><div class="value saved">${fmtBD(sm.saved_bytes || 0)}</div></div>`;
+        html += `</div>`;
+
+        if ((d.unreadable || []).length) {
+          html += `<h2 style="margin-top:16px">Unreadable / Broken Source Files <span style="color:var(--fg2);font-weight:400">(${d.unreadable.length})</span></h2><div class="table-wrap"><table><thead><tr><th>File</th><th>Size</th><th>Problem</th></tr></thead><tbody>`;
+          d.unreadable.forEach((r) => {
+            html += `<tr><td title="${r.path}">${bn(r.path)}</td><td class="mono">${fmtB(r.original_size || 0)}</td><td style="color:var(--err);font-size:0.75rem">${(r.reason || "").substring(0, 80)}</td></tr>`;
+          });
+          html += `</tbody></table></div>`;
+        }
+
+        if ((d.by_codec || []).length) {
+          html += `<h2 style="margin-top:16px">By Source Codec</h2><div class="table-wrap"><table><thead><tr><th>Codec</th><th>Count</th><th>Saved</th></tr></thead><tbody>`;
+          d.by_codec.forEach((c) => {
+            html += `<tr><td>${c.codec}</td><td class="mono">${c.count}</td><td class="saved">${fmtBD(c.saved)}</td></tr>`;
+          });
+          html += `</tbody></table></div>`;
+        }
+        if ((d.by_resolution || []).length) {
+          html += `<h2 style="margin-top:16px">By Resolution</h2><div class="table-wrap"><table><thead><tr><th>Resolution</th><th>Count</th><th>Saved</th></tr></thead><tbody>`;
+          d.by_resolution.forEach((r) => {
+            html += `<tr><td>${r.resolution}</td><td class="mono">${r.count}</td><td class="saved">${fmtBD(r.saved)}</td></tr>`;
+          });
+          html += `</tbody></table></div>`;
+        }
+        if ((d.top_pending || []).length) {
+          html += `<h2 style="margin-top:16px">Top Pending (by size)</h2><div class="table-wrap"><table><thead><tr><th>File</th><th>Size</th><th>Codec</th><th>Resolution</th></tr></thead><tbody>`;
+          d.top_pending.forEach((r) => {
+            html += `<tr><td title="${r.path}">${bn(r.path)}</td><td class="mono">${fmtB(r.original_size || 0)}</td><td>${r.video_codec || "—"}</td><td>${r.video_width ? r.video_width + "x" + r.video_height : "—"}</td></tr>`;
+          });
+          html += `</tbody></table></div>`;
+        }
+        box.innerHTML = html;
+      }
+
+      function renderConfig(cfg) {
+        const g = $("gConfig");
+        g.innerHTML = "";
+        const items = [
+          ["Library Path", cfg.library_path || "(not set)"],
+          ["State DB", cfg.state_db_path],
+          ["Temp Dir", cfg.temp_dir],
+          ["Log Path", cfg.log_path || "(stdout)"],
+          ["Video Encoder", cfg.video_encoder],
+          ["Video Quality", cfg.video_quality],
+          ["Video Preset", cfg.video_preset],
+          ["Parallel Jobs", cfg.parallel_jobs],
+          ["Keep Backup", cfg.keep_backup ? "Yes" : "No"],
+          ["Verify Checksum", cfg.verify_checksum ? "Yes" : "No"],
+          ["Verbose", cfg.verbose ? "Yes" : "No"],
+        ];
+        items.forEach(([k, v]) => {
+          const d = document.createElement("div");
+          d.className = "config-item";
+          d.innerHTML = `<div class="key">${k}</div><div class="val">${v}</div>`;
+          g.appendChild(d);
+        });
+      }
+
+      function switchTab(name) {
+        document
+          .querySelectorAll(".tab")
+          .forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
+        document
+          .querySelectorAll(".panel")
+          .forEach((p) =>
+            p.classList.toggle("active", p.id === "panel-" + name),
+          );
+        if (name === "queue") fetchQueue();
+        if (name === "report") fetchReport();
+        if (name === "logs") fetchLogs();
+        if (name === "config") fetchConfig();
+      }
+
+      async function doScan() {
+        const r = await postJSON("/api/scan", { dry_run: true });
+        alert(r.ok ? "Incremental scan started." : r.message);
+        fetchStatus();
+      }
+      async function doFullScan() {
+        if (
+          !confirm(
+            "Full scan re-probes every file except already-transcoded ones. On a network mount this can take a while. Continue?",
+          )
+        )
+          return;
+        const r = await postJSON("/api/scan", { dry_run: true, full: true });
+        alert(r.ok ? "Full scan started." : r.message);
+        fetchStatus();
+      }
+      async function doTranscode() {
+        const r = await postJSON("/api/transcode", {});
+        alert(r.ok ? "Transcode started." : r.message);
+        fetchStatus();
+      }
+      async function doHealth() {
+        const r = await postJSON("/api/health-check", {});
+        alert(r.ok ? "Health check started." : r.message);
+        fetchStatus();
+      }
+      async function doStop() {
+        const r = await postJSON("/api/stop", {});
+        alert(r.message);
+        fetchStatus();
+      }
+      async function doReset() {
+        if (!confirm("Reset all failed entries to pending?")) return;
+        const r = await postJSON("/api/reset-failed", {});
+        alert(r.message);
+        fetchStatus();
+        fetchQueue();
+      }
+
+      // Keyboard shortcuts
+      document.addEventListener("keydown", (e) => {
+        if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")
+          return;
+        const k = e.key.toLowerCase();
+        if (k === "s" && !e.shiftKey) {
+          e.preventDefault();
+          doScan();
+        }
+        if (k === "s" && e.shiftKey) {
+          e.preventDefault();
+          doFullScan();
+        }
+        if (k === "t") {
+          e.preventDefault();
+          doTranscode();
+        }
+        if (k === "h") {
+          e.preventDefault();
+          doHealth();
+        }
+        if (k === "x") {
+          e.preventDefault();
+          doStop();
+        }
+        if (k === "r") {
+          e.preventDefault();
+          fetchStatus();
+        }
+        if (k === "1") switchTab("queue");
+        if (k === "2") switchTab("recent");
+        if (k === "3") switchTab("failed");
+        if (k === "4") switchTab("shows");
+        if (k === "5") switchTab("report");
+        if (k === "6") switchTab("logs");
+        if (k === "7") switchTab("config");
+      });
+
+      fetchStatus();
+      fetchQueue();
+      setInterval(fetchStatus, 5000);
+      openEvents();
+    </script>
+  </body>
+</html>
