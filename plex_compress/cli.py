@@ -2,6 +2,7 @@
 
 import argparse
 import fnmatch
+import json
 import os
 import signal
 import sys
@@ -54,8 +55,84 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-post-replace-verify", action="store_true", help="Skip post-replace verification of final file")
     parser.add_argument("--watch", action="store_true", help="Watch mode: monitor library for new files and auto-process")
     parser.add_argument("--watch-interval", type=float, default=60.0, help="Polling interval in seconds for watch mode (default: 60)")
+    parser.add_argument("--intelligent-scan", action="store_true", help="Use intelligent scan with metadata persistence and incremental detection")
+    parser.add_argument("--report", action="store_true", help="Generate comprehensive transcoding report and exit")
+    parser.add_argument("--report-format", default="text", choices=["text", "json"], help="Report output format")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
+
+
+def _format_report(report: dict, fmt: str = "text") -> str:
+    if fmt == "json":
+        return json.dumps(report, indent=2, default=str)
+
+    lines = []
+    lines.append("=" * 60)
+    lines.append("PLEX COMPRESS TRANSCODING REPORT")
+    lines.append("=" * 60)
+
+    summary = report.get("summary", {})
+    lines.append(f"\n--- Summary ---")
+    lines.append(f"Total files tracked:    {summary.get('total', 0)}")
+    lines.append(f"Completed:              {summary.get('completed', 0)}")
+    lines.append(f"Failed:                 {summary.get('failed', 0)}")
+    lines.append(f"Skipped:                {summary.get('skipped', 0)}")
+    lines.append(f"In progress:            {summary.get('in_progress', 0)}")
+    orig_gb = summary.get('original_size_bytes', 0) / (1024 ** 3)
+    out_gb = summary.get('output_size_bytes', 0) / (1024 ** 3)
+    saved_gb = summary.get('saved_bytes', 0) / (1024 ** 3)
+    lines.append(f"Original size:          {orig_gb:.1f} GB")
+    lines.append(f"Output size:            {out_gb:.1f} GB")
+    lines.append(f"Space saved:            {saved_gb:.1f} GB")
+    pred_gb = summary.get('predicted_savings_bytes', 0) / (1024 ** 3)
+    actual_gb = summary.get('actual_savings_bytes', 0) / (1024 ** 3)
+    err_gb = summary.get('prediction_error_bytes', 0) / (1024 ** 3)
+    lines.append(f"Predicted savings:      {pred_gb:.1f} GB")
+    lines.append(f"Actual savings:         {actual_gb:.1f} GB")
+    lines.append(f"Prediction error:       {err_gb:+.1f} GB")
+
+    by_codec = report.get("by_codec", [])
+    if by_codec:
+        lines.append(f"\n--- By Source Video Codec ---")
+        for row in by_codec:
+            codec = row.get("video_codec", "unknown")
+            count = row.get("count", 0)
+            saved = row.get("saved", 0) / (1024 ** 3)
+            avg = row.get("avg_saved", 0) / (1024 ** 2)
+            lines.append(f"  {codec:12s}  {count:4d} files  {saved:8.1f} GB total  {avg:6.1f} MB avg")
+
+    by_res = report.get("by_resolution", [])
+    if by_res:
+        lines.append(f"\n--- By Resolution ---")
+        for row in by_res:
+            w = row.get("video_width", 0)
+            h = row.get("video_height", 0)
+            count = row.get("count", 0)
+            saved = row.get("saved", 0) / (1024 ** 3)
+            lines.append(f"  {w}x{h:4d}  {count:4d} files  {saved:8.1f} GB")
+
+    top = report.get("top_pending", [])
+    if top:
+        lines.append(f"\n--- Top 10 Pending Candidates (by predicted savings) ---")
+        for i, row in enumerate(top[:10], 1):
+            path = os.path.basename(row.get("path", "unknown"))
+            vc = row.get("video_codec", "?")
+            res = f"{row.get('video_width', '?')}x{row.get('video_height', '?')}"
+            pred_mb = (row.get("predicted_savings_bytes") or 0) / (1024 ** 2)
+            lines.append(f"  {i:2d}. {path:40s} {vc:8s} {res:10s} ~{pred_mb:6.0f} MB")
+
+    scans = report.get("scan_history", [])
+    if scans:
+        lines.append(f"\n--- Recent Scan History ---")
+        for row in scans[:5]:
+            ts = row.get("scanned_at", "?")
+            total = row.get("total_files", 0)
+            cand = row.get("candidates", 0)
+            est = row.get("estimated_savings_gb", 0)
+            lines.append(f"  {ts}  {total:5d} files  {cand:4d} candidates  ~{est:6.1f} GB est.")
+
+    lines.append("\n" + "=" * 60)
+    return "\n".join(lines)
 
 
 def main(argv: Optional[list] = None) -> int:
@@ -104,6 +181,14 @@ def main(argv: Optional[list] = None) -> int:
         state.reset_failed()
         logger.info("Reset failed entries.")
 
+    # Report mode
+    if args.report:
+        from .intelligence import generate_report
+        report = generate_report(state)
+        output = _format_report(report, fmt=args.report_format)
+        print(output)
+        return 0
+
     # Watch mode
     if args.watch:
         if not cfg.library_path or not os.path.isdir(cfg.library_path):
@@ -112,7 +197,7 @@ def main(argv: Optional[list] = None) -> int:
         from .watch import LibraryWatcher
         from .transcoder import transcode_file
 
-        watcher = LibraryWatcher(cfg, state, logger)
+        watcher = LibraryWatcher(cfg, state, logger, intelligent=args.intelligent_scan)
 
         def _process(path: str) -> bool:
             return transcode_file(path, cfg, state, logger)
@@ -150,7 +235,12 @@ def main(argv: Optional[list] = None) -> int:
             logger.error(f"Library path required and must be a directory: {cfg.library_path}")
             return 1
         logger.info(f"Scanning library: {cfg.library_path}")
-        report = scan_library(cfg, state=state, force=cfg.force)
+
+        if args.intelligent_scan:
+            from .intelligence import scan_library_intelligent
+            report = scan_library_intelligent(cfg, state=state, force=cfg.force, logger=logger)
+        else:
+            report = scan_library(cfg, state=state, force=cfg.force)
 
     # Apply include-pattern filter
     candidates = report["candidates"]
@@ -163,6 +253,12 @@ def main(argv: Optional[list] = None) -> int:
     logger.info(f"Already optimal: {report['already_optimal']}")
     logger.info(f"Skipped: {len(report['skipped'])}")
     logger.info(f"Estimated savings: {report['estimated_savings_gb']:.1f} GB")
+
+    # Print per-codec breakdown if available (intelligent scan)
+    if "by_codec" in report:
+        logger.info("Breakdown by source codec:")
+        for codec, data in report["by_codec"].items():
+            logger.info(f"  {codec}: {data['count']} files, ~{data['predicted_savings'] / (1024**3):.1f} GB predicted savings")
 
     if cfg.dry_run:
         # Print first 20 candidates
@@ -178,7 +274,7 @@ def main(argv: Optional[list] = None) -> int:
 
     success = 0
     failed = 0
-    skipped = 0
+    skipped_count = 0
 
     for path in candidates:
         if not _running:
@@ -188,7 +284,7 @@ def main(argv: Optional[list] = None) -> int:
         existing_status = state.get_status(path)
         if existing_status == "completed" and not cfg.force:
             logger.info(f"Skipping already completed: {path}")
-            skipped += 1
+            skipped_count += 1
             continue
 
         state.mark_started(path)
@@ -200,7 +296,7 @@ def main(argv: Optional[list] = None) -> int:
 
     stats = state.get_stats()
     logger.info(
-        f"Batch complete: {success} succeeded, {failed} failed, {skipped} skipped. "
+        f"Batch complete: {success} succeeded, {failed} failed, {skipped_count} skipped. "
         f"Total saved: {stats['saved_bytes'] / 1024 / 1024:.1f} MB"
     )
     return 0 if failed == 0 else 1

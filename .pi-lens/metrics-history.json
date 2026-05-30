@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "files": {
+    "plex_compress/webui/static/app.js": {
+      "latest": {
+        "commit": "e17fa87",
+        "timestamp": "2026-05-30T00:46:16.448Z",
+        "mi": 2.7,
+        "cognitive": 389,
+        "nesting": 7,
+        "lines": 1109,
+        "maxCyclomatic": 137,
+        "entropy": 6.46
+      },
+      "history": [
+        {
+          "commit": "e17fa87",
+          "timestamp": "2026-05-29T19:50:38.123Z",
+          "mi": 13.6,
+          "cognitive": 259,
+          "nesting": 6,
+          "lines": 523,
+          "maxCyclomatic": 124,
+          "entropy": 6.5
+        },
+        {
+          "commit": "e17fa87",
+          "timestamp": "2026-05-29T22:16:47.175Z",
+          "mi": 11.6,
+          "cognitive": 274,
+          "nesting": 5,
+          "lines": 527,
+          "maxCyclomatic": 112,
+          "entropy": 6.28
+        },
+        {
+          "commit": "e17fa87",
+          "timestamp": "2026-05-30T00:33:14.638Z",
+          "mi": 3.2,
+          "cognitive": 373,
+          "nesting": 7,
+          "lines": 1079,
+          "maxCyclomatic": 137,
+          "entropy": 6.45
+        },
+        {
+          "commit": "e17fa87",
+          "timestamp": "2026-05-30T00:46:16.448Z",
+          "mi": 2.7,
+          "cognitive": 389,
+          "nesting": 7,
+          "lines": 1109,
+          "maxCyclomatic": 137,
+          "entropy": 6.46
+        }
+      ],
+      "trend": "regressing"
+    }
+  },
+  "capturedAt": "2026-05-30T00:46:21.449Z"
+}

@@ -51,7 +51,7 @@ Create a tool that scans a Plex TV library, identifies files that would benefit 
 - AC3/E-AC3 @ 320–640 kbps is wasteful when only 2 channels are used.
 
 **Downmix strategy:**
-- Use ffmpeg’s built-in `-ac 2` downmixer (ATSC coefficients, layout-aware for 5.1/5.1(side)/7.1).
+- Use ffmpeg's built-in `-ac 2` downmixer (ATSC coefficients, layout-aware for 5.1/5.1(side)/7.1).
 - Follow with `loudnorm` EBU R128 normalization.
 
 **Why not custom pan coefficients:**
@@ -76,7 +76,7 @@ loudnorm=I=-16:TP=-1.5:LRA=11
 
 **Why MKV:**
 - Preserves ASS/SubRip subtitles without conversion.
-- Supports multiple audio tracks if we ever add an option to keep originals.
+- Supports multiple audio tracks.
 - Modern Plex clients direct-play MKV + HEVC + AAC without issue.
 
 ## 4. Workflow Design
@@ -107,8 +107,9 @@ loudnorm=I=-16:TP=-1.5:LRA=11
 | Audio already stereo AAC + video already HEVC | Already optimal. |
 | File size < 200 MB | Likely already low-bitrate; not worth CPU time. |
 | Duration < 5 min | Extras, trailers, etc. |
-| Failed verification last run | Don’t retry until manually cleared. |
+| Failed verification last run | Don't retry until manually cleared. |
 | User-specified exclusion path | Override list. |
+| File modified < 5 minutes ago | Incomplete write (Sonarr/Radarr still copying). |
 
 ### 4.4 Safety & Resume
 
@@ -116,21 +117,37 @@ loudnorm=I=-16:TP=-1.5:LRA=11
 - `--dry-run` mode shows what would happen without touching files.
 - `--backup` option keeps originals in a `.plex_compress_backup` directory.
 - SIGINT/SIGTERM graceful shutdown: finish current file, clean temp.
+- `--health-check` pre-flight validation before any destructive work.
 
 ## 5. Project Structure
 
 ```
 plex_compress/
-├── __init__.py
-├── config.py       # Defaults, constants, validation
-├── probe.py        # ffprobe JSON wrapper
-├── scanner.py      # Library scan + candidate selection
-├── audio.py        # Audio filter string builder
-├── video.py        # Video encoder string builder
-├── transcoder.py   # Single-file transcode + verify + replace
-├── state.py        # SQLite persistence
-├── cli.py          # argparse entrypoint
-└── utils.py        # Temp dirs, logging, file ops
+├── __init__.py       # Exception hierarchy, exports
+├── config.py         # Defaults, constants, validation
+├── probe.py          # ffprobe JSON wrapper
+├── scanner.py        # Library scan + candidate selection
+├── intelligence.py   # Savings prediction, incremental scan, priority queue, reports
+├── audio.py          # Audio filter string builder
+├── video.py          # Video encoder string builder
+├── transcoder.py     # Single-file transcode + verify + replace
+├── state.py          # SQLite persistence with v2 schema + migrations
+├── cli.py            # argparse entrypoint
+├── health.py         # Pre-flight health check
+├── watch.py          # Autonomous watch mode
+├── utils.py          # Temp dirs, logging, file ops
+└── webui/            # Web dashboard (SPA)
+    ├── __init__.py
+    ├── __main__.py
+    ├── server.py       # HTTP server + REST API + SSE
+    ├── runner.py       # Background job executor
+    ├── config_store.py # JSON config persistence
+    ├── log_buffer.py   # In-memory ring-buffer log handler
+    ├── extensions.py   # Plugin loader
+    └── static/         # Frontend assets
+        ├── index.html
+        ├── style.css
+        └── app.js
 
 tests/
 ├── conftest.py
@@ -138,6 +155,7 @@ tests/
 ├── test_scanner.py
 ├── test_audio.py
 ├── test_transcoder.py
+├── test_intelligence.py   # Savings prediction, incremental scan, reports
 └── fixtures/
     └── sample_probe.json
 ```
@@ -149,7 +167,10 @@ tests/
 - Candidate selection logic with mocked probes.
 - Audio filter string correctness.
 - Video command builder correctness.
-- State database CRUD.
+- State database CRUD + schema migration.
+- Savings prediction accuracy.
+- Incremental scan logic (hash comparison).
+- Priority queue ordering.
 
 ### 6.2 Integration Tests (require real ffmpeg + sample file)
 - Transcode a 30-second sample cut from a real library file.
@@ -157,13 +178,16 @@ tests/
 - Verify loudnorm produced non-clipped, normalized audio.
 - Verify subtitle streams copied.
 - Verify atomic replacement works and is rollback-safe.
+- Verify per-stream audio mapping (default downmixed, others copied).
 
 ### 6.3 Real-World Validation (require user approval)
 1. Dry-run scan of full library → report candidate count and estimated savings.
-2. Transcode 1 episode from 3 different shows (action, dialogue-heavy, animated).
-3. Playback test on Plex (Apple TV, iPhone, web) → confirm direct play.
-4. ABX listening test → compare original 5.1 downmixed by Plex vs. pre-downmixed stereo.
-5. Batch test: 10 episodes overnight → measure speed, stability, actual savings.
+2. Intelligent scan → verify incremental detection, metadata persistence, per-codec breakdowns.
+3. Transcode 1 episode from 3 different shows (action, dialogue-heavy, animated).
+4. Playback test on Plex (Apple TV, iPhone, web) → confirm direct play.
+5. ABX listening test → compare original 5.1 downmixed by Plex vs. pre-downmixed stereo.
+6. Batch test: 10 episodes overnight → measure speed, stability, actual savings.
+7. Report generation → verify prediction accuracy against actual savings.
 
 ## 7. Performance Estimates
 
@@ -174,6 +198,7 @@ tests/
 | Estimated candidates | ~6,000–7,500 files |
 | Estimated time full library | ~40–120 hours (can run incrementally) |
 | Expected space savings | ~2.0–2.5 TB (30–40% of current H.264 volume) |
+| Intelligent scan re-scan | ~10× faster (skips unchanged files) |
 
 ## 8. Risks & Mitigations
 
@@ -184,6 +209,7 @@ tests/
 | Network interruption during copy/replace | Verify file checksum after copy; atomic move on same filesystem. |
 | ffmpeg crash / corrupted output | Mandatory verification pass; keep backup until verified. |
 | Plex re-scans and loses watch status | Plex preserves watch status by metadata hash if filenames unchanged. |
+| Savings prediction inaccurate | Model tracks actual vs predicted; improves with more data. |
 
 ## 9. Decision Log
 
@@ -195,3 +221,10 @@ tests/
 | Container | MKV | MP4 | Subtitle preservation; negligible Plex impact. |
 | Temp location | MacBook local | NAS | NAS nearly full; avoid double-space usage. |
 | Keep original 5.1? | No (default) | Yes | User wants space savings; can add flag later. |
+| Audio mapping | Per-stream | Global `-map 0:a?` | Preserves commentary, dubs, descriptive audio. |
+| Scan strategy | Incremental hash | Full re-probe every time | 10× faster re-scans on large libraries. |
+| Queue ordering | Predicted savings | FIFO | Biggest space wins processed first. |
+| State DB schema | Versioned (v2) | Flat v1 | Enables migrations, rich metadata, reporting. |
+| Web UI framework | Vanilla JS + stdlib server | React, Next.js, FastAPI | Zero build step, zero dependencies, portable. |
+| UI design system | Three-layer tokens (Primitive→Semantic→Component) | Flat CSS, Bootstrap | Themeable, maintainable, matches shadcn/ui patterns. |
+| Real-time updates | Server-Sent Events (SSE) | WebSockets, polling | Simplex push over HTTP, no extra protocol. |

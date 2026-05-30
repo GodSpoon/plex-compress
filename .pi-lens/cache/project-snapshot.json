@@ -1,0 +1,311 @@
+{
+  "version": 1,
+  "projectRoot": "/Users/sking/SPOON_GIT/plex-compress",
+  "generatedAt": "2026-05-30T03:46:08.421Z",
+  "seq": 32,
+  "files": {
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/__init__.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/__init__.py",
+      "mtimeMs": 1780092975166.608,
+      "size": 4029,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/__main__.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/__main__.py",
+      "mtimeMs": 1779011119438.2312,
+      "size": 143,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/audio.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/audio.py",
+      "mtimeMs": 1779010821667.668,
+      "size": 1487,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/cli.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/cli.py",
+      "mtimeMs": 1780092975166.734,
+      "size": 13536,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/config.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/config.py",
+      "mtimeMs": 1779631747913.1816,
+      "size": 3238,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/health.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/health.py",
+      "mtimeMs": 1779631747913.3801,
+      "size": 5181,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/intelligence.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/intelligence.py",
+      "mtimeMs": 1780081468020.499,
+      "size": 13285,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/probe.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/probe.py",
+      "mtimeMs": 1779487787928.5757,
+      "size": 3751,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/scanner.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/scanner.py",
+      "mtimeMs": 1779489129834.612,
+      "size": 4069,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/state.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/state.py",
+      "mtimeMs": 1780092975166.875,
+      "size": 21420,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/transcoder.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/transcoder.py",
+      "mtimeMs": 1779631747913.8193,
+      "size": 11861,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/utils.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/utils.py",
+      "mtimeMs": 1779631747913.9858,
+      "size": 3101,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/video.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/video.py",
+      "mtimeMs": 1779428469651.7415,
+      "size": 1295,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/watch.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/watch.py",
+      "mtimeMs": 1780092975166.9893,
+      "size": 3495,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/__init__.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/__init__.py",
+      "mtimeMs": 1780092985140.4883,
+      "size": 106,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/__main__.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/__main__.py",
+      "mtimeMs": 1780092985140.6084,
+      "size": 344,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/config_store.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/config_store.py",
+      "mtimeMs": 1780092985140.708,
+      "size": 3154,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/extensions.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/extensions.py",
+      "mtimeMs": 1780092985140.8027,
+      "size": 1942,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/log_buffer.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/log_buffer.py",
+      "mtimeMs": 1780092985140.8955,
+      "size": 1261,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/runner.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/runner.py",
+      "mtimeMs": 1780092985141.0881,
+      "size": 10844,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/server.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/server.py",
+      "mtimeMs": 1780092985141.2332,
+      "size": 19492,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/static/app.js": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/static/app.js",
+      "mtimeMs": 1780093493574.1482,
+      "size": 31709,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/scripts/dashboard.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/scripts/dashboard.py",
+      "mtimeMs": 1779595561859.8518,
+      "size": 6884,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/scripts/webui.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/scripts/webui.py",
+      "mtimeMs": 1780092985141.798,
+      "size": 450,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/tests/conftest.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/tests/conftest.py",
+      "mtimeMs": 1779011020643.871,
+      "size": 504,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/tests/test_audio.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/tests/test_audio.py",
+      "mtimeMs": 1779011073478.561,
+      "size": 1050,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/tests/test_intelligence.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/tests/test_intelligence.py",
+      "mtimeMs": 1780081594314.485,
+      "size": 14150,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/tests/test_probe.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/tests/test_probe.py",
+      "mtimeMs": 1779011037477.3296,
+      "size": 1601,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/tests/test_scanner.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/tests/test_scanner.py",
+      "mtimeMs": 1779489296600.7173,
+      "size": 2290,
+      "imports": [],
+      "lastSeq": 0
+    },
+    "/Users/sking/SPOON_GIT/plex-compress/tests/test_transcoder.py": {
+      "path": "/Users/sking/SPOON_GIT/plex-compress/tests/test_transcoder.py",
+      "mtimeMs": 1779631747914.4497,
+      "size": 9469,
+      "imports": [],
+      "lastSeq": 0
+    }
+  },
+  "symbols": {},
+  "reverseDeps": {
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/__init__.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/__main__.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/audio.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/cli.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/config.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/health.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/intelligence.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/probe.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/scanner.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/state.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/transcoder.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/utils.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/video.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/watch.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/__init__.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/__main__.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/config_store.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/extensions.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/log_buffer.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/runner.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/server.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/plex_compress/webui/static/app.js": [],
+    "/Users/sking/SPOON_GIT/plex-compress/scripts/dashboard.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/scripts/webui.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/tests/conftest.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/tests/test_audio.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/tests/test_intelligence.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/tests/test_probe.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/tests/test_scanner.py": [],
+    "/Users/sking/SPOON_GIT/plex-compress/tests/test_transcoder.py": []
+  },
+  "cachedExports": [],
+  "projectRulesScan": {
+    "rules": [],
+    "hasCustomRules": false
+  },
+  "startupScan": {
+    "cwd": "/Users/sking/SPOON_GIT/plex-compress",
+    "scanRoot": "/Users/sking/SPOON_GIT/plex-compress",
+    "projectRoot": "/Users/sking/SPOON_GIT/plex-compress",
+    "canWarmCaches": true,
+    "sourceFileCount": 30
+  },
+  "languageProfile": {
+    "present": {
+      "jsts": true,
+      "python": true,
+      "go": false,
+      "rust": false,
+      "cxx": false,
+      "cmake": false,
+      "fish": false,
+      "shell": false,
+      "json": false,
+      "markdown": false,
+      "css": false,
+      "yaml": false,
+      "sql": false,
+      "ruby": false,
+      "html": false,
+      "docker": false,
+      "php": false,
+      "powershell": false,
+      "prisma": false,
+      "csharp": false,
+      "fsharp": false,
+      "java": false,
+      "kotlin": false,
+      "swift": false,
+      "dart": false,
+      "lua": false,
+      "zig": false,
+      "haskell": false,
+      "elixir": false,
+      "gleam": false,
+      "ocaml": false,
+      "clojure": false,
+      "terraform": false,
+      "nix": false,
+      "toml": false
+    },
+    "configured": {},
+    "counts": {
+      "python": 29,
+      "jsts": 1
+    },
+    "detectedKinds": [
+      "jsts",
+      "python"
+    ]
+  }
+}

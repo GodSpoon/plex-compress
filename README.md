@@ -8,7 +8,7 @@ Transcode Plex libraries to space-efficient HEVC (H.265) with stereo-normalized 
 
 ## Why
 
-Plex libraries accumulate large H.264 + 5.1 AC3/E-AC3 files. Pre-transcoding to HEVC + stereo AAC saves **30-45%** disk space, eliminates on-the-fly audio downmixing, and direct-plays on virtually every client.
+Plex libraries accumulate large H.264 + 5.1 AC3/E-AC3 files. Pre-transcoding to HEVC + stereo AAC saves **30-55%** disk space, eliminates on-the-fly audio downmixing, and direct-plays on virtually every client.
 
 ## Install
 
@@ -42,6 +42,9 @@ python3 -m plex_compress --health-check --video-encoder hevc_nvenc
 # Dry-run scan to see what would be processed
 python3 -m plex_compress /mnt/plex/TV --dry-run --video-encoder hevc_nvenc
 
+# Intelligent dry-run: persists metadata, estimates per-file savings, skips unchanged files
+python3 -m plex_compress /mnt/plex/TV --dry-run --intelligent-scan --video-encoder hevc_nvenc
+
 # Transcode a single file to test quality
 python3 -m plex_compress /mnt/plex/TV \
   --file "/mnt/plex/TV/Show/Season 01/E01.mkv" \
@@ -63,7 +66,50 @@ python3 -m plex_compress /mnt/plex/TV \
   --watch-interval 300 \
   --video-encoder hevc_nvenc \
   --backup
+
+# Generate a comprehensive report of what's been done and what's pending
+python3 -m plex_compress --report
+python3 -m plex_compress --report --report-format json
 ```
+
+## Web UI
+
+A full-featured web dashboard is included for visual monitoring and control.
+
+```bash
+# Start the web UI server
+python3 -m plex_compress.webui
+
+# Or specify host/port
+python3 -m plex_compress.webui --host 0.0.0.0 --port 8765
+```
+
+Then open **http://localhost:8765** (or your machine's IP for LAN access).
+
+### Web UI Features
+
+| Feature | Description |
+|---------|-------------|
+| **Dashboard** | Real-time stats (completed, failed, pending, space saved), progress bar, current activity |
+| **Queue** | Pending files sorted by predicted savings with codec/resolution info |
+| **Library** | Searchable/filterable view of all tracked files by status |
+| **Reports** | Charts (by codec, by resolution), prediction accuracy, scan history, top candidates |
+| **Configuration** | Full config form with encoder presets, paths, safety toggles |
+| **Live Logs** | Real-time log stream from the server |
+| **Extensions** | Plugin system for custom routes and event handlers |
+| **Command Palette** | `Ctrl/Cmd + K` — fuzzy-search all actions and navigation |
+| **Keyboard Shortcuts** | `g d` Dashboard, `g q` Queue, `h` Health Check, `t` Transcode, `r` Refresh, etc. |
+| **Server-Sent Events** | Live progress updates without polling |
+| **Mobile Responsive** | Collapsible sidebar, stacked layouts |
+
+### Web UI Design System
+
+The UI uses a three-layer token architecture (Primitive → Semantic → Component):
+- Dark theme with glassmorphism sidebar
+- Gradient buttons with glow effects
+- Skeleton loaders on first load
+- Empty states with icons for all tables
+- `prefers-reduced-motion` and `prefers-contrast` support
 
 ## CLI Options
 
@@ -102,6 +148,14 @@ python3 -m plex_compress /mnt/plex/TV \
 | `--no-file-locking` | — | Allow concurrent processing of same file (not recommended) | `False` |
 | `--no-post-replace-verify` | — | Skip post-replace verification of final file | `False` |
 
+### Intelligent Scan and Reporting
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--intelligent-scan` | Persist rich metadata, incremental re-scan, per-file savings prediction | `False` |
+| `--report` | Generate comprehensive report and exit | `False` |
+| `--report-format` | `text` or `json` | `text` |
+
 ### Autonomous Operation
 
 | Flag | Description | Default |
@@ -136,6 +190,42 @@ python3 -m plex_compress /mnt/plex/TV \
   --video-encoder hevc_nvenc \
   --verbose
 ```
+
+### Intelligent Scan (Recommended)
+
+```bash
+python3 -m plex_compress /mnt/plex/TV \
+  --dry-run \
+  --intelligent-scan \
+  --video-encoder hevc_nvenc
+```
+
+The intelligent scanner:
+- **Persists rich metadata** for every file (codec, resolution, bitrate, channels, duration)
+- **Skips unchanged files** on re-scan by comparing `mtime:size` hash — no re-probing
+- **Predicts per-file savings** based on source codec and bitrate tier
+- **Sorts the queue by predicted savings** — biggest space wins are processed first
+- **Tracks prediction accuracy** so the model improves over time
+
+### Generate a Report
+
+```bash
+# Human-readable report
+python3 -m plex_compress --report
+
+# JSON for scripting
+python3 -m plex_compress --report --report-format json
+
+# Use a specific state DB
+python3 -m plex_compress --report --state-db /path/to/custom.db
+```
+
+Report includes:
+- **Summary**: total/completed/failed/skipped, space saved, prediction accuracy
+- **By codec**: per-source-codec breakdown (count, total saved, average saved)
+- **By resolution**: per-resolution breakdown
+- **Top pending**: highest-value candidates waiting to be processed
+- **Scan history**: recent scan snapshots for trend analysis
 
 ### Transcode a Single File (Test Quality)
 
@@ -207,6 +297,19 @@ python3 -m plex_compress /mnt/plex/TV \
 
 Runs indefinitely, polling the library every 5 minutes for new files and auto-processing them. Safe to run as a systemd service or tmux session.
 
+### Watch Mode with Intelligent Scanning
+
+```bash
+python3 -m plex_compress /mnt/plex/TV \
+  --watch \
+  --watch-interval 300 \
+  --intelligent-scan \
+  --video-encoder hevc_nvenc \
+  --backup
+```
+
+Only processes new or changed files. Already-scanned files are skipped via hash comparison.
+
 ## NVIDIA RTX 2070 Super (Turing) Tuning
 
 The RTX 2070 Super has a dedicated **NVDEC/NVENC** chip. Recommended settings:
@@ -236,14 +339,19 @@ python3 -m plex_compress /mnt/plex \
    python3 -m plex_compress --health-check --video-encoder hevc_nvenc
    ```
 
-3. **Dry-run to estimate savings:**
+3. **Intelligent dry-run to estimate savings:**
    ```bash
-   ./scripts/dry-run.sh
+   python3 -m plex_compress /mnt/plex/TV --dry-run --intelligent-scan --video-encoder hevc_nvenc
    ```
 
 4. **Batch transcode overnight:**
    ```bash
    ./scripts/run-nvenc.sh
+   ```
+
+5. **Check progress with a report:**
+   ```bash
+   python3 -m plex_compress --report
    ```
 
 Logs and state DB are written to `~/.plex_compress/` so you can resume after reboot or interrupt.
@@ -288,10 +396,54 @@ Every output is verified before the original is replaced:
 - **Stale job reset**: auto-resets `in_progress` entries to `pending` on startup (crash recovery)
 - **Retry logic**: files failing with duration mismatch are retried once before being marked failed
 
+### Intelligent Features
+
+- **Incremental scan**: unchanged files are skipped on re-scan via `mtime:size` hash comparison
+- **Per-file savings prediction**: estimates space savings based on source codec, bitrate, and audio channel count
+- **Priority queue**: pending files sorted by predicted savings — process the biggest wins first
+- **Prediction accuracy tracking**: compares predicted vs actual savings to improve estimates over time
+- **Scan history**: records every scan with candidate counts and estimated savings for trend analysis
+- **Rich metadata**: persists codec, resolution, bitrate, channels, duration for every file
+
+## State Database Schema
+
+The SQLite database (`~/.plex_compress/state.db`) uses a versioned schema:
+
+### `files` table
+| Column | Type | Description |
+|--------|------|-------------|
+| `path` | TEXT | Unique file path |
+| `status` | TEXT | `pending` / `in_progress` / `completed` / `failed` / `skipped` |
+| `original_size` | INTEGER | Source file size in bytes |
+| `output_size` | INTEGER | Transcoded file size in bytes |
+| `video_codec` | TEXT | Source video codec (e.g. `h264`) |
+| `video_width` | INTEGER | Video width in pixels |
+| `video_height` | INTEGER | Video height in pixels |
+| `video_bitrate` | INTEGER | Source video bitrate (bps) |
+| `audio_codec` | TEXT | Source audio codec (e.g. `ac3`) |
+| `audio_channels` | INTEGER | Source audio channel count |
+| `duration` | REAL | Duration in seconds |
+| `predicted_savings_bytes` | INTEGER | Estimated savings before transcoding |
+| `actual_savings_bytes` | INTEGER | Realized savings after transcoding |
+| `scan_hash` | TEXT | `mtime:size` hash for incremental scanning |
+
+### `scans` table
+Records each library scan for trend analysis.
+
+### `sessions` table
+Records each batch session for resume and statistics.
+
 ## Tests
 
 ```bash
+# Run all tests
 python3 -m pytest tests/ -v
+
+# Run with coverage
+python3 -m pytest tests/ --cov=plex_compress --cov-report=term-missing
+
+# Run only intelligence tests
+python3 -m pytest tests/test_intelligence.py -v
 ```
 
 ## License
