@@ -24,7 +24,9 @@ if [[ "$ENCODER" == "auto" ]]; then
 	echo "[entrypoint] Auto-detecting best encoder..."
 
 	# Check NVIDIA NVENC
-	if ffmpeg -encoders 2>/dev/null | grep -q hevc_nvenc; then
+	# Note: avoid grep -q with pipefail — it closes the pipe early and
+	# causes ffmpeg to get SIGPIPE, making the pipeline return non-zero.
+	if ffmpeg -encoders 2>/dev/null | grep hevc_nvenc >/dev/null 2>&1; then
 		if nvidia-smi -L &>/dev/null || [[ -c /dev/nvidiactl ]]; then
 			ENCODER="hevc_nvenc"
 			echo "[entrypoint] NVIDIA GPU detected — using hevc_nvenc"
@@ -34,7 +36,7 @@ if [[ "$ENCODER" == "auto" ]]; then
 	fi
 
 	# Check Apple VideoToolbox (only works on native macOS, not in Linux containers)
-	if [[ "$ENCODER" == "auto" ]] && ffmpeg -encoders 2>/dev/null | grep -q hevc_videotoolbox; then
+	if [[ "$ENCODER" == "auto" ]] && ffmpeg -encoders 2>/dev/null | grep hevc_videotoolbox >/dev/null 2>&1; then
 		# In a Linux container, videotoolbox won't work even if compiled in
 		if [[ "$(uname -s)" == "Darwin" ]]; then
 			ENCODER="hevc_videotoolbox"
