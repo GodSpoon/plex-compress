@@ -24,7 +24,8 @@ classifiers = [
 
 [project.scripts]
 plex-compress = "plex_compress.cli:main"
-plex-compress-webui = "plex_compress.webui.server:main"
+# Note: plex-compress-webui is available on the autoresearch/session-20260524 branch
+# plex-compress-webui = "plex_compress.webui.server:main"
 
 [project.urls]
 Homepage = "https://github.com/GodSpoon/plex-compress"

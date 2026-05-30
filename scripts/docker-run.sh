@@ -10,11 +10,10 @@ set -euo pipefail
 #   - Plex library mounted at PLEX_ROOT
 #
 # Usage:
-#   ./scripts/docker-run.sh transcode --limit 10
-#   ./scripts/docker-run.sh dry-run
 #   ./scripts/docker-run.sh health-check
+#   ./scripts/docker-run.sh dry-run
+#   ./scripts/docker-run.sh transcode --limit 10
 #   ./scripts/docker-run.sh watch
-#   ./scripts/docker-run.sh webui   # starts Web UI + watch mode via compose
 #
 # Environment overrides:
 #   PLEX_ROOT=/mnt/plex ENCODER=hevc_nvenc PARALLEL=2 ./scripts/docker-run.sh transcode
@@ -95,21 +94,20 @@ VOL_ARGS=(
 )
 
 # ------------------------------------------------------------------------------
-# Compose path for long-running services (webui + watch)
+# Compose path for long-running services
 # ------------------------------------------------------------------------------
 CMD="${1:-transcode}"
 shift || true
 
-if [[ "$CMD" == "webui" ]]; then
-	echo "[docker-run] Starting Web UI + Watch mode via compose..."
-	shift || true
+if [[ "$CMD" == "compose-up" ]]; then
+	echo "[docker-run] Starting compose stack (idle by default)..."
 	export PLEX_ROOT ENCODER QUALITY PRESET PARALLEL TEMP_DIR CONFIG_DIR BACKUP DRY_RUN VERBOSE
 	if [[ "$CONTAINER_TOOL" == "podman" ]]; then
 		podman compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d "$@"
 	else
 		docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d "$@"
 	fi
-	echo "[docker-run] Web UI available at http://localhost:8765"
+	echo "[docker-run] Stack running. Use 'docker compose exec plex-compress transcode|watch|dry-run' to start work."
 	exit 0
 fi
 

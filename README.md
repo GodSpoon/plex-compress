@@ -63,14 +63,15 @@ podman build -t plex-compress:latest -f Containerfile .
 ./scripts/docker-run.sh dry-run
 ./scripts/docker-run.sh transcode --limit 10
 
-# Long-running Web UI + Watch mode via Compose
-./scripts/docker-run.sh webui
+# Start compose stack (idle by default, exec into it to run work)
+./scripts/docker-run.sh compose-up
 
 # Or manually with Compose
-DOCKER_BUILDKIT=1 docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
+docker compose exec plex-compress transcode --limit 10
 ```
 
-The wrapper auto-detects Podman vs Docker and passes `--device nvidia.com/gpu=all` (Podman) or `--runtime=nvidia` (Docker) as needed.
+The wrapper auto-detects Podman vs Docker and passes `--device nvidia.com/gpu=all` (Podman) or `--runtime=nvidia` (Docker) as needed. The container defaults to `help` mode — it will **never** auto-transcode on startup. You must explicitly run `transcode`, `watch`, or `dry-run`.
 
 ### macOS M5 Pro — Apple Silicon
 
@@ -94,11 +95,12 @@ The entrypoint supports these subcommands:
 
 | Command | Description |
 |---------|-------------|
+| `help` | Print usage and current config (default — safe, no work) |
 | `health-check` | Pre-flight validation inside the container |
 | `dry-run` | Scan library and report candidates |
-| `transcode` | Batch transcode |
-| `watch` | Watch-mode (polls for new files) |
-| `webui` | Start Web UI server on `:8765` |
+| `transcode` | Batch transcode once, then exit |
+| `watch` | Watch-mode (polls for new files, runs forever) |
+| `webui` | Start Web UI server on `:8765` *(autoresearch branch only)* |
 | `shell` | Drop to bash for debugging |
 | `ffmpeg` | Passthrough to container ffmpeg |
 
@@ -117,12 +119,13 @@ The entrypoint supports these subcommands:
 | `PLEX_COMPRESS_BACKUP` | `0` | Set to `1` to keep originals |
 | `PLEX_COMPRESS_DRY_RUN` | `0` | Set to `1` for scan-only mode |
 | `PLEX_COMPRESS_VERBOSE` | `0` | Set to `1` for debug logging |
+| `PLEX_COMPRESS_VERIFY_CHECKSUM` | `0` | Set to `1` to verify SHA-256 on copy |
 
 ### Compose File Reference
 
 | File | Purpose |
 |------|---------|
-| `docker-compose.yml` | Base stack — Web UI + Watch mode |
+| `docker-compose.yml` | Base stack — idle by default (safe, no auto-transcode) |
 | `docker-compose.nvidia.yml` | NVIDIA GPU runtime override (w7) |
 | `docker-compose.macos.yml` | macOS override (forces software encoder) |
 

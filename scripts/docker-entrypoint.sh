@@ -136,8 +136,16 @@ watch)
 	;;
 
 webui)
-	echo "[entrypoint] Starting Web UI on 0.0.0.0:8765"
-	exec /opt/venv/bin/python -m plex_compress.webui --host 0.0.0.0 --port 8765 "$@"
+	# Web UI is available on the autoresearch/session-20260524 branch.
+	# On master, the webui module is not yet included.
+	if /opt/venv/bin/python -c "import plex_compress.webui.__main__" 2>/dev/null; then
+		echo "[entrypoint] Starting Web UI on 0.0.0.0:8765"
+		exec /opt/venv/bin/python -m plex_compress.webui --host 0.0.0.0 --port 8765 "$@"
+	else
+		echo "[entrypoint] Web UI not available in this build."
+		echo "[entrypoint] Switch to the autoresearch/session-20260524 branch for webui support."
+		exit 1
+	fi
 	;;
 
 shell | bash | sh)
