@@ -1703,7 +1703,11 @@ kbd {
 	text-align: center;
 	padding: var(--sp-6) var(--sp-4);
 	margin-bottom: var(--sp-5);
-	background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(59, 130, 246, 0.06));
+	background: linear-gradient(
+		135deg,
+		rgba(16, 185, 129, 0.08),
+		rgba(59, 130, 246, 0.06)
+	);
 	border-radius: var(--rd-lg);
 	border: 1px solid var(--border-subtle);
 }
