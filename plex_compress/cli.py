@@ -30,6 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("library_path", nargs="?", default="", help="Root path of the library to scan/transcode (optional when --file is used)")
     parser.add_argument("--dry-run", action="store_true", help="Scan only, do not transcode")
+    parser.add_argument("--full-scan", action="store_true", help="Re-probe every file (ignore the incremental skip cache); 'completed' files are still skipped unless --force")
     parser.add_argument("--backup", action="store_true", help="Keep original files as .backup")
     parser.add_argument("--limit", type=int, default=None, help="Max files to process")
     parser.add_argument("--temp-dir", default=None, help="Temp directory for transcoding")
@@ -110,7 +111,6 @@ def main(argv: Optional[list] = None) -> int:
             logger.error(f"Library path required for watch mode: {cfg.library_path}")
             return 1
         from .watch import LibraryWatcher
-        from .transcoder import transcode_file
 
         watcher = LibraryWatcher(cfg, state, logger)
 
@@ -150,7 +150,7 @@ def main(argv: Optional[list] = None) -> int:
             logger.error(f"Library path required and must be a directory: {cfg.library_path}")
             return 1
         logger.info(f"Scanning library: {cfg.library_path}")
-        report = scan_library(cfg, state=state, force=cfg.force)
+        report = scan_library(cfg, state=state, force=cfg.force, full_scan=args.full_scan, logger=logger)
 
     # Apply include-pattern filter
     candidates = report["candidates"]
@@ -158,10 +158,15 @@ def main(argv: Optional[list] = None) -> int:
         candidates = [p for p in candidates if fnmatch.fnmatch(os.path.basename(p), cfg.include_pattern)]
         logger.info(f"After pattern filter '{cfg.include_pattern}': {len(candidates)} files")
 
+    errors = report.get("errors", [])
     logger.info(f"Total files: {report['total_files']}")
     logger.info(f"Candidates: {len(candidates)}")
     logger.info(f"Already optimal: {report['already_optimal']}")
     logger.info(f"Skipped: {len(report['skipped'])}")
+    if errors:
+        logger.info(f"Unreadable/broken: {len(errors)}")
+    if 'probed' in report:
+        logger.info(f"Probed this scan: {report['probed']} (cached: {report.get('cached', 0)})")
     logger.info(f"Estimated savings: {report['estimated_savings_gb']:.1f} GB")
 
     if cfg.dry_run:
@@ -170,6 +175,8 @@ def main(argv: Optional[list] = None) -> int:
             logger.info(f"  [CANDIDATE] {p}")
         for p, reason in report["skipped"][:20]:
             logger.info(f"  [SKIPPED] {p}: {reason}")
+        for p, reason in errors:
+            logger.info(f"  [UNREADABLE] {p}: {reason.splitlines()[0] if reason else ''}")
         return 0
 
     # Process candidates
