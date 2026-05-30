@@ -19,6 +19,7 @@ from .utils import (
     acquire_file_lock, release_file_lock, is_file_recently_modified,
 )
 from . import (
+    PlexCompressError,
     TranscodeError,
     VerificationError,
     FfmpegError,
@@ -73,7 +74,7 @@ def build_ffmpeg_command(input_path: str, output_path: str, cfg: Config, probe_d
             for i, stream in enumerate(audio_streams):
                 if i == default_idx:
                     if audio_filter:
-                        cmd.extend([f"-af:a:{i}", audio_filter])
+                        cmd.extend([f"-filter:a:{i}", audio_filter])
                     if not cfg.use_rfc7845_downmix:
                         cmd.extend([f"-ac:a:{i}", str(cfg.audio_channels)])
                     cmd.extend([
@@ -316,6 +317,11 @@ def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
                 if attempt == 0:
                     logger.warning(f"Duration mismatch on attempt 1, retrying once...")
                     continue
+                break
+            except InterruptError:
+                raise
+            except PlexCompressError as e:
+                last_error = e
                 break
 
         if last_error:
