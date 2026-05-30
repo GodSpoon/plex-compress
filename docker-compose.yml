@@ -1,0 +1,72 @@
+# Plex Compose — Primary stack for Willaird 7 (w7)
+# Linux + NVIDIA NVENC via Docker / Podman + nvidia-container-toolkit
+#
+# Prerequisites:
+#   Docker:  nvidia-container-toolkit installed + `docker run --rm --runtime=nvidia ...`
+#   Podman:  nvidia-container-toolkit + `podman run --device nvidia.com/gpu=all ...`
+#
+# IMPORTANT: This compose file does NOT auto-transcode by default.
+# The container starts in idle mode. You must explicitly exec into it
+# or override the command to start transcoding.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
+#   docker compose exec plex-compress transcode --limit 10
+#   docker compose exec plex-compress health-check
+#   docker compose exec plex-compress dry-run
+#   docker compose exec plex-compress watch
+#
+# One-shots (container exits after command):
+#   docker compose run --rm plex-compress transcode --limit 10
+#   docker compose run --rm plex-compress dry-run
+#
+# Override locally (gitignored):
+#   cp docker-compose.yml docker-compose.override.yml
+#   # edit docker-compose.override.yml with your paths / commands
+
+services:
+  plex-compress:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        FFMPEG_IMAGE: jrottenberg/ffmpeg:7.1-nvidia
+    image: plex-compress:latest
+    container_name: plex-compress
+    # NVIDIA Container Toolkit runtime (Docker)
+    # For Podman, use:  podman compose up -d  (Podman 4+ handles this)
+    # Or pass --device nvidia.com/gpu=all
+    # To enable NVIDIA runtime, also include:  -f docker-compose.nvidia.yml
+    environment:
+      # App config
+      - PLEX_COMPRESS_ENCODER=${ENCODER:-auto}
+      - PLEX_COMPRESS_QUALITY=${QUALITY:-28}
+      - PLEX_COMPRESS_PRESET=${PRESET:-p4}
+      - PLEX_COMPRESS_PARALLEL=${PARALLEL:-2}
+      - PLEX_COMPRESS_TEMP_DIR=/tmp/plex_compress
+      - PLEX_COMPRESS_STATE_DB=/config/state.db
+      - PLEX_COMPRESS_LOG=/config/plex_compress.log
+      - PLEX_COMPRESS_BACKUP=${BACKUP:-1}
+      - PLEX_COMPRESS_DRY_RUN=${DRY_RUN:-0}
+      - PLEX_COMPRESS_VERBOSE=${VERBOSE:-1}
+      - PLEX_COMPRESS_VERIFY_CHECKSUM=${VERIFY_CHECKSUM:-0}
+    volumes:
+      # Mount your Plex library here
+      - ${PLEX_ROOT:-/mnt/truenas-media/Video}:/mnt/plex:rw
+      # Persistent state / logs
+      - ${CONFIG_DIR:-~/.plex_compress}:/config
+      # Temp directory (can be a fast local SSD)
+      - ${TEMP_DIR:-~/tmp/plex_compress}:/tmp/plex_compress
+    # Default: idle loop. Does NOT transcode automatically.
+    # Override at runtime to transcode or watch:
+    #   docker compose run --rm plex-compress transcode --limit 10
+    #   docker compose run --rm plex-compress watch
+    command: >
+      sh -c "echo 'Plex Compress is idle. Run: docker compose exec plex-compress transcode|watch|dry-run|health-check';
+             while true; do sleep 3600; done"
+    # If you prefer the container to exit after a one-shot transcode,
+    # use `docker compose run --rm` instead of `up`.
+    restart: unless-stopped
+    # Resource limits (tune for your hardware)
+    # GPU reservations are moved to docker-compose.nvidia.yml
+    # so macOS and non-GPU hosts can use the base file cleanly.

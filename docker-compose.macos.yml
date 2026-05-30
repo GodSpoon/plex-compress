@@ -1,0 +1,24 @@
+# Plex Compose — macOS override (Apple Silicon / M5 Pro)
+#
+# ⚠️  IMPORTANT: Apple VideoToolbox CANNOT passthrough to Linux containers.
+#    This compose file runs plex-compress in a Linux ARM64 container using
+#    software encoding (libx265). It is SLOWER than native macOS execution.
+#
+#    For native hardware transcoding on your M5 Pro, use:
+#      ./scripts/docker-run-macos.sh native
+#
+#    This Docker path is useful for:
+#      - Testing the containerized build locally
+#      - Running on Macs where you don't want to install Python dependencies
+#      - CI / build verification
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.macos.yml up -d
+#   podman compose -f docker-compose.yml -f docker-compose.macos.yml up -d
+
+services:
+  plex-compress:
+    # Force software encoder since Apple GPU does not passthrough to Linux VMs
+    environment:
+      - PLEX_COMPRESS_ENCODER=libx265
+      - NVIDIA_VISIBLE_DEVICES=void

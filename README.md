@@ -3,12 +3,12 @@
 Transcode Plex libraries to space-efficient HEVC (H.265) with stereo-normalized audio.
 
 - **Video:** HEVC via `libx265` (CPU), `hevc_videotoolbox` (Apple Silicon), or **`hevc_nvenc`** (NVIDIA RTX 20-series+)
-- **Audio:** AAC-LC stereo @ 160 kbps with EBU R128 loudnorm (`I=-16 LUFS`)
-- **Container:** MKV (subtitle preservation)
+- **Audio:** Default track -> AAC-LC stereo @ 160 kbps with EBU R128 loudnorm (`I=-16 LUFS`). All other audio tracks copied as-is.
+- **Container:** MKV (subtitle/attachment/chapter preservation)
 
 ## Why
 
-Plex libraries accumulate large H.264 + 5.1 AC3/E-AC3 files. Pre-transcoding to HEVC + stereo AAC saves **30-45%** disk space, eliminates on-the-fly audio downmixing, and direct-plays on virtually every client.
+Plex libraries accumulate large H.264 + 5.1 AC3/E-AC3 files. Pre-transcoding to HEVC + stereo AAC saves **30-55%** disk space, eliminates on-the-fly audio downmixing, and direct-plays on virtually every client.
 
 ## Install
 
@@ -29,15 +29,147 @@ ffmpeg -encoders 2>/dev/null | grep hevc_nvenc
 nvidia-smi
 ```
 
-## Quick Start
+## Container Usage (Recommended)
+
+Plex Compress ships with first-class Docker/Podman support. The container includes ffmpeg 7.1 with NVENC support and auto-detects the best available encoder at runtime.
+
+### Prerequisites
+
+- **Docker** or **Podman**
+- **Linux + NVIDIA**: `nvidia-container-toolkit` installed
+- **macOS**: No extra container tools needed (see native path below for hardware encoding)
+
+### Quick Start — Container
+
+```bash
+git clone https://github.com/GodSpoon/plex-compress.git
+cd plex-compress
+
+# Copy and edit environment config
+cp .env.example .env
+# Edit PLEX_ROOT and any encoder settings
+```
+
+### Willaird 7 (w7) — Linux + NVIDIA NVENC
+
+```bash
+# Build once
+docker build -t plex-compress:latest .
+# Or with Podman:
+podman build -t plex-compress:latest -f Containerfile .
+
+# One-shot commands via wrapper
+./scripts/docker-run.sh health-check
+./scripts/docker-run.sh dry-run
+./scripts/docker-run.sh transcode --limit 10
+
+# Long-running Web UI + Watch mode via Compose
+./scripts/docker-run.sh webui
+
+# Or manually with Compose
+DOCKER_BUILDKIT=1 docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
+```
+
+The wrapper auto-detects Podman vs Docker and passes `--device nvidia.com/gpu=all` (Podman) or `--runtime=nvidia` (Docker) as needed.
+
+### macOS M5 Pro — Apple Silicon
+
+**⚠️ Apple VideoToolbox does NOT passthrough to Linux containers.** For hardware transcoding on your M5 Pro, use the **native** path. The Docker path is available but falls back to software encoding (`libx265`).
+
+```bash
+# NATIVE (fast — uses VideoToolbox hardware encoding)
+./scripts/docker-run-macos.sh native health-check
+./scripts/docker-run-macos.sh native dry-run
+./scripts/docker-run-macos.sh native transcode --limit 10
+./scripts/docker-run-macos.sh native watch
+./scripts/docker-run-macos.sh native webui
+
+# DOCKER (slow — software encoding, for testing only)
+./scripts/docker-run-macos.sh docker dry-run
+```
+
+### Container Commands
+
+The entrypoint supports these subcommands:
+
+| Command | Description |
+|---------|-------------|
+| `health-check` | Pre-flight validation inside the container |
+| `dry-run` | Scan library and report candidates |
+| `transcode` | Batch transcode |
+| `watch` | Watch-mode (polls for new files) |
+| `webui` | Start Web UI server on `:8765` |
+| `shell` | Drop to bash for debugging |
+| `ffmpeg` | Passthrough to container ffmpeg |
+
+### Container Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PLEX_COMPRESS_ENCODER` | `auto` | `auto`, `hevc_nvenc`, `hevc_videotoolbox`, `libx265` |
+| `PLEX_COMPRESS_QUALITY` | `28` | CRF/CQ value |
+| `PLEX_COMPRESS_PRESET` | `medium` | Encoder preset |
+| `PLEX_COMPRESS_PARALLEL` | `1` | Concurrent transcodes |
+| `PLEX_COMPRESS_LIBRARY_PATH` | `/mnt/plex` | Library mount point inside container |
+| `PLEX_COMPRESS_TEMP_DIR` | `/tmp/plex_compress` | Temp directory (mount a fast disk here) |
+| `PLEX_COMPRESS_STATE_DB` | `/config/state.db` | SQLite database path |
+| `PLEX_COMPRESS_LOG` | `/config/plex_compress.log` | Log file path |
+| `PLEX_COMPRESS_BACKUP` | `0` | Set to `1` to keep originals |
+| `PLEX_COMPRESS_DRY_RUN` | `0` | Set to `1` for scan-only mode |
+| `PLEX_COMPRESS_VERBOSE` | `0` | Set to `1` for debug logging |
+
+### Compose File Reference
+
+| File | Purpose |
+|------|---------|
+| `docker-compose.yml` | Base stack — Web UI + Watch mode |
+| `docker-compose.nvidia.yml` | NVIDIA GPU runtime override (w7) |
+| `docker-compose.macos.yml` | macOS override (forces software encoder) |
+
+### Building Multi-Arch Images
+
+```bash
+# AMD64 + ARM64 (useful for mixed fleets)
+docker buildx create --use
+docker buildx build --platform linux/amd64,linux/arm64 -t plex-compress:latest .
+```
+
+## Native / Manual Install
+
+If you prefer running directly on the host without containers:
+
+Requires **ffmpeg** compiled with the encoder you plan to use:
+
+```bash
+# macOS (VideoToolbox)
+brew install ffmpeg
+
+# Arch Linux (NVENC)
+sudo pacman -S ffmpeg nvidia-utils
+```
+
+For NVENC, verify your GPU is visible:
+
+```bash
+ffmpeg -encoders 2>/dev/null | grep hevc_nvenc
+nvidia-smi
+```
+
+## Quick Start (Native)
 
 ```bash
 # Clone and enter the repo
 git clone https://github.com/GodSpoon/plex-compress.git
 cd plex-compress
 
+# Health check (recommended before any batch run)
+python3 -m plex_compress --health-check --video-encoder hevc_nvenc
+
 # Dry-run scan to see what would be processed
 python3 -m plex_compress /mnt/plex/TV --dry-run --video-encoder hevc_nvenc
+
+# Intelligent dry-run: persists metadata, estimates per-file savings, skips unchanged files
+python3 -m plex_compress /mnt/plex/TV --dry-run --intelligent-scan --video-encoder hevc_nvenc
 
 # Transcode a single file to test quality
 python3 -m plex_compress /mnt/plex/TV \
@@ -53,7 +185,57 @@ python3 -m plex_compress /mnt/plex/TV \
   --parallel-jobs 2 \
   --backup \
   --limit 10
+
+# Autonomous watch mode (processes new files as they appear)
+python3 -m plex_compress /mnt/plex/TV \
+  --watch \
+  --watch-interval 300 \
+  --video-encoder hevc_nvenc \
+  --backup
+
+# Generate a comprehensive report of what's been done and what's pending
+python3 -m plex_compress --report
+python3 -m plex_compress --report --report-format json
 ```
+
+## Web UI
+
+A full-featured web dashboard is included for visual monitoring and control.
+
+```bash
+# Start the web UI server
+python3 -m plex_compress.webui
+
+# Or specify host/port
+python3 -m plex_compress.webui --host 0.0.0.0 --port 8765
+```
+
+Then open **http://localhost:8765** (or your machine's IP for LAN access).
+
+### Web UI Features
+
+| Feature | Description |
+|---------|-------------|
+| **Dashboard** | Real-time stats (completed, failed, pending, space saved), progress bar, current activity |
+| **Queue** | Pending files sorted by predicted savings with codec/resolution info |
+| **Library** | Searchable/filterable view of all tracked files by status |
+| **Reports** | Charts (by codec, by resolution), prediction accuracy, scan history, top candidates |
+| **Configuration** | Full config form with encoder presets, paths, safety toggles |
+| **Live Logs** | Real-time log stream from the server |
+| **Extensions** | Plugin system for custom routes and event handlers |
+| **Command Palette** | `Ctrl/Cmd + K` — fuzzy-search all actions and navigation |
+| **Keyboard Shortcuts** | `g d` Dashboard, `g q` Queue, `h` Health Check, `t` Transcode, `r` Refresh, etc. |
+| **Server-Sent Events** | Live progress updates without polling |
+| **Mobile Responsive** | Collapsible sidebar, stacked layouts |
+
+### Web UI Design System
+
+The UI uses a three-layer token architecture (Primitive → Semantic → Component):
+- Dark theme with glassmorphism sidebar
+- Gradient buttons with glow effects
+- Skeleton loaders on first load
+- Empty states with icons for all tables
+- `prefers-reduced-motion` and `prefers-contrast` support
 
 ## CLI Options
 
@@ -88,6 +270,25 @@ python3 -m plex_compress /mnt/plex/TV \
 | `--force` | — | Re-process files already marked completed in state DB | `False` |
 | `--no-verify-checksum` | — | Skip SHA-256 checksum when copying over network mounts | `False` |
 | `--reset-failed` | — | Reset failed entries in state DB and retry them | `False` |
+| `--min-file-age` | — | Skip files modified within last N seconds | `300` |
+| `--no-file-locking` | — | Allow concurrent processing of same file (not recommended) | `False` |
+| `--no-post-replace-verify` | — | Skip post-replace verification of final file | `False` |
+
+### Intelligent Scan and Reporting
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--intelligent-scan` | Persist rich metadata, incremental re-scan, per-file savings prediction | `False` |
+| `--report` | Generate comprehensive report and exit | `False` |
+| `--report-format` | `text` or `json` | `text` |
+
+### Autonomous Operation
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--watch` | Monitor library for new files and auto-process | `False` |
+| `--watch-interval` | Polling interval in seconds for watch mode | `60` |
+| `--health-check` | Run pre-flight validation and exit | `False` |
 
 ### Persistence
 
@@ -99,6 +300,14 @@ python3 -m plex_compress /mnt/plex/TV \
 
 ## Usage Examples
 
+### Health Check (Pre-Flight)
+
+```bash
+python3 -m plex_compress --health-check --video-encoder hevc_nvenc --verbose
+```
+
+Validates ffmpeg, ffprobe, hardware encoder, temp space, state DB, and audio filter chain before any destructive work.
+
 ### Scan and Estimate Savings
 
 ```bash
@@ -107,6 +316,42 @@ python3 -m plex_compress /mnt/plex/TV \
   --video-encoder hevc_nvenc \
   --verbose
 ```
+
+### Intelligent Scan (Recommended)
+
+```bash
+python3 -m plex_compress /mnt/plex/TV \
+  --dry-run \
+  --intelligent-scan \
+  --video-encoder hevc_nvenc
+```
+
+The intelligent scanner:
+- **Persists rich metadata** for every file (codec, resolution, bitrate, channels, duration)
+- **Skips unchanged files** on re-scan by comparing `mtime:size` hash — no re-probing
+- **Predicts per-file savings** based on source codec and bitrate tier
+- **Sorts the queue by predicted savings** — biggest space wins are processed first
+- **Tracks prediction accuracy** so the model improves over time
+
+### Generate a Report
+
+```bash
+# Human-readable report
+python3 -m plex_compress --report
+
+# JSON for scripting
+python3 -m plex_compress --report --report-format json
+
+# Use a specific state DB
+python3 -m plex_compress --report --state-db /path/to/custom.db
+```
+
+Report includes:
+- **Summary**: total/completed/failed/skipped, space saved, prediction accuracy
+- **By codec**: per-source-codec breakdown (count, total saved, average saved)
+- **By resolution**: per-resolution breakdown
+- **Top pending**: highest-value candidates waiting to be processed
+- **Scan history**: recent scan snapshots for trend analysis
 
 ### Transcode a Single File (Test Quality)
 
@@ -165,6 +410,32 @@ python3 -m plex_compress /mnt/plex/TV \
 
 If interrupted (Ctrl-C), re-run the same command and it resumes where it left off using the state database.
 
+### Autonomous Watch Mode
+
+```bash
+python3 -m plex_compress /mnt/plex/TV \
+  --watch \
+  --watch-interval 300 \
+  --video-encoder hevc_nvenc \
+  --backup \
+  --log ~/.plex_compress/watch.log
+```
+
+Runs indefinitely, polling the library every 5 minutes for new files and auto-processing them. Safe to run as a systemd service or tmux session.
+
+### Watch Mode with Intelligent Scanning
+
+```bash
+python3 -m plex_compress /mnt/plex/TV \
+  --watch \
+  --watch-interval 300 \
+  --intelligent-scan \
+  --video-encoder hevc_nvenc \
+  --backup
+```
+
+Only processes new or changed files. Already-scanned files are skipped via hash comparison.
+
 ## NVIDIA RTX 2070 Super (Turing) Tuning
 
 The RTX 2070 Super has a dedicated **NVDEC/NVENC** chip. Recommended settings:
@@ -189,30 +460,116 @@ python3 -m plex_compress /mnt/plex \
    //nas/plex /mnt/plex cifs credentials=/etc/.smbcred,uid=sam,gid=sam 0 0
    ```
 
-2. **Dry-run to estimate savings:**
+2. **Health check before any batch:**
    ```bash
-   ./scripts/dry-run.sh
+   python3 -m plex_compress --health-check --video-encoder hevc_nvenc
    ```
 
-3. **Batch transcode overnight:**
+3. **Intelligent dry-run to estimate savings:**
+   ```bash
+   python3 -m plex_compress /mnt/plex/TV --dry-run --intelligent-scan --video-encoder hevc_nvenc
+   ```
+
+4. **Batch transcode overnight:**
    ```bash
    ./scripts/run-nvenc.sh
    ```
 
+5. **Check progress with a report:**
+   ```bash
+   python3 -m plex_compress --report
+   ```
+
 Logs and state DB are written to `~/.plex_compress/` so you can resume after reboot or interrupt.
 
-## Safety
+## Safety Architecture
 
-- **Atomic replacement**: original is either kept as `.backup` or removed only after successful verification.
-- **Verification pass**: every output is re-probed for codec, duration (+/-2 s), channel layout, and subtitle preservation.
-- **Size guard**: if output is > 110% of input, the transcode is rejected.
-- **Resume**: SQLite state DB tracks every file; re-run resumes where it left off.
-- **Non-destructive mode**: use `--output-dir` to write to a separate directory, leaving originals untouched.
+### Data Loss Prevention
+
+- **Atomic replacement**: temp file written to same filesystem, then `os.replace()` atomically swaps. No partial writes possible.
+- **Backup mode**: `--backup` keeps original as `.plex_compress_backup`. Post-replace verification can rollback if the new file is corrupt.
+- **Post-replace verification**: after atomic swap, the final file is re-probed to confirm it's valid. If not, and a backup exists, automatic rollback occurs.
+- **File locking**: prevents multiple processes from transcoding the same file simultaneously.
+- **File age guard**: skips files modified within the last 5 minutes, avoiding race conditions with downloaders (Sonarr/Radarr) still writing the file.
+
+### Quality Verification
+
+Every output is verified before the original is replaced:
+
+- **Video codec**: must be HEVC (not H.264 passthrough)
+- **Duration**: output within ±2 seconds of input (with auto-retry on transient GPU failures)
+- **Audio streams**: no audio tracks dropped
+- **Audio layout**: default track must be stereo (no >2 channel surround leaking through)
+- **Subtitle streams**: no subtitle tracks dropped
+- **Attachments**: no font/image attachments dropped
+- **Chapters**: all chapters preserved
+- **Size guard**: rejects if output > 110% of input (catches egregious bloat)
+- **Efficiency guard**: rejects if output > 95% of input (skips already-efficient sources)
+
+### Stream Preservation
+
+- **Default audio track**: downmixed to stereo + EBU R128 loudnorm (`-16 LUFS`, `-1.5 dBTP`, `11 LRA`)
+- **Other audio tracks**: copied as-is (commentary, alternate languages, descriptive audio all preserved)
+- **Subtitles**: copied without re-encoding
+- **Attachments**: copied (fonts, cover images)
+- **Chapters**: preserved with `-map_chapters 0`
+- **Metadata**: preserved with `-map_metadata 0` (titles, language tags, disposition flags)
+
+### Resume and Concurrency
+
+- **SQLite state DB**: tracks every file's status (`pending`/`in_progress`/`completed`/`failed`/`skipped`)
+- **WAL mode**: SQLite Write-Ahead Logging + 5-second busy timeout for safe concurrent access
+- **Stale job reset**: auto-resets `in_progress` entries to `pending` on startup (crash recovery)
+- **Retry logic**: files failing with duration mismatch are retried once before being marked failed
+
+### Intelligent Features
+
+- **Incremental scan**: unchanged files are skipped on re-scan via `mtime:size` hash comparison
+- **Per-file savings prediction**: estimates space savings based on source codec, bitrate, and audio channel count
+- **Priority queue**: pending files sorted by predicted savings — process the biggest wins first
+- **Prediction accuracy tracking**: compares predicted vs actual savings to improve estimates over time
+- **Scan history**: records every scan with candidate counts and estimated savings for trend analysis
+- **Rich metadata**: persists codec, resolution, bitrate, channels, duration for every file
+
+## State Database Schema
+
+The SQLite database (`~/.plex_compress/state.db`) uses a versioned schema:
+
+### `files` table
+| Column | Type | Description |
+|--------|------|-------------|
+| `path` | TEXT | Unique file path |
+| `status` | TEXT | `pending` / `in_progress` / `completed` / `failed` / `skipped` |
+| `original_size` | INTEGER | Source file size in bytes |
+| `output_size` | INTEGER | Transcoded file size in bytes |
+| `video_codec` | TEXT | Source video codec (e.g. `h264`) |
+| `video_width` | INTEGER | Video width in pixels |
+| `video_height` | INTEGER | Video height in pixels |
+| `video_bitrate` | INTEGER | Source video bitrate (bps) |
+| `audio_codec` | TEXT | Source audio codec (e.g. `ac3`) |
+| `audio_channels` | INTEGER | Source audio channel count |
+| `duration` | REAL | Duration in seconds |
+| `predicted_savings_bytes` | INTEGER | Estimated savings before transcoding |
+| `actual_savings_bytes` | INTEGER | Realized savings after transcoding |
+| `scan_hash` | TEXT | `mtime:size` hash for incremental scanning |
+
+### `scans` table
+Records each library scan for trend analysis.
+
+### `sessions` table
+Records each batch session for resume and statistics.
 
 ## Tests
 
 ```bash
+# Run all tests
 python3 -m pytest tests/ -v
+
+# Run with coverage
+python3 -m pytest tests/ --cov=plex_compress --cov-report=term-missing
+
+# Run only intelligence tests
+python3 -m pytest tests/test_intelligence.py -v
 ```
 
 ## License

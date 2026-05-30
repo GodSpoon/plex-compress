@@ -1,0 +1,19 @@
+# Plex Compose — NVIDIA GPU override for Linux hosts (w7)
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
+#   podman compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
+
+services:
+  plex-compress:
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
