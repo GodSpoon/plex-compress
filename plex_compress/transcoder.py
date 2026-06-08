@@ -1,14 +1,18 @@
 """Core transcoding logic: copy, transcode, verify, replace."""
 
 import os
+import re
 import shutil
+import statistics
 import subprocess
+import time
 from typing import Optional
 
 from .config import Config
 from .probe import (
     probe_file, get_video_stream, get_audio_streams, get_subtitle_streams,
-    get_duration, get_file_size, get_attachment_streams, get_chapters
+    get_duration, get_file_size, get_attachment_streams, get_chapters,
+    get_video_stream_meta, get_audio_streams_meta,
 )
 from .audio import build_audio_encoder_args, build_audio_filter
 
@@ -74,7 +78,7 @@ def build_ffmpeg_command(input_path: str, output_path: str, cfg: Config, probe_d
             for i, stream in enumerate(audio_streams):
                 if i == default_idx:
                     if audio_filter:
-                        cmd.extend([f"-filter:a:{i}", audio_filter])
+                        cmd.extend([f"-af:a:{i}", audio_filter])
                     if not cfg.use_rfc7845_downmix:
                         cmd.extend([f"-ac:a:{i}", str(cfg.audio_channels)])
                     cmd.extend([
@@ -98,10 +102,16 @@ def build_ffmpeg_command(input_path: str, output_path: str, cfg: Config, probe_d
 
 
 
-def verify_output(input_path: str, output_path: str, cfg: Config) -> None:
-    """Verify the transcoded output meets expectations."""
+def verify_output(input_path: str, output_path: str, cfg: Config, in_probe: Optional[dict] = None) -> None:
+    """Verify the transcoded output meets expectations.
+
+    in_probe: optional pre-computed input probe dict. When provided, the
+    function skips a redundant ffprobe on the input. Callers that already
+    have the input probed (e.g. transcoder._transcode_attempt) should pass it.
+    """
     try:
-        in_probe = probe_file(input_path)
+        if in_probe is None:
+            in_probe = probe_file(input_path)
         out_probe = probe_file(output_path)
     except Exception as e:
         raise VerificationError(f"Probe failed during verification: {e}")
@@ -171,6 +181,115 @@ def verify_output(input_path: str, output_path: str, cfg: Config) -> None:
 
 
 
+_FPS_RE = re.compile(r"fps=\s*([0-9]*\.?[0-9]+)")
+
+
+def _parse_fps_samples(ffmpeg_log: str) -> list:
+    """Return the list of fps samples ffmpeg reported to stderr.
+
+    ffmpeg's `-progress` style progress lines look like
+        frame=  120 fps= 45 q=... size=... time=00:00:04.00 ...
+    Returns floats in sample order. Empty list on any read error.
+    """
+    try:
+        with open(ffmpeg_log, "r", errors="replace") as f:
+            text = f.read()
+    except OSError:
+        return []
+    out: list = []
+    for m in _FPS_RE.finditer(text):
+        try:
+            v = float(m.group(1))
+            if v > 0 and v < 1e6:  # filter out clearly bogus values
+                out.append(v)
+        except (ValueError, IndexError):
+            continue
+    return out
+
+
+def _steady_state_fps(samples: list) -> Optional[float]:
+    """Return the steady-state median fps from a list of samples.
+
+    Trims a fixed fraction of warmup and cooldown samples (encoder init
+    tends to produce low values for the first second or two, and the last
+    few samples are noisy as ffmpeg shuts down). Returns None if no
+    samples are available.
+    """
+    if not samples:
+        return None
+    n = len(samples)
+    trim_lo = min(5, max(0, n // 4))
+    trim_hi = max(trim_lo + 1, n - 3)
+    steady = samples[trim_lo:trim_hi] if trim_hi > trim_lo else samples
+    if not steady:
+        return None
+    try:
+        return float(statistics.median(steady))
+    except statistics.StatisticsError:
+        return None
+
+
+def _build_encode_metrics(
+    in_probe: dict,
+    out_size: int,
+    in_size: int,
+    cfg: Config,
+    wallclock_seconds: Optional[float],
+    achieved_fps: Optional[float],
+) -> dict:
+    """Build the metrics dict we persist alongside each completed transcode.
+
+    All values are best-effort; missing data is left as None. Never raises.
+    """
+    m: dict = {
+        "encoder": cfg.video_encoder,
+        "encoder_quality": cfg.video_quality,
+        "encoder_preset": cfg.video_preset,
+        "actual_savings_bytes": max(0, in_size - out_size),
+        "output_bytes": out_size,
+        "input_bytes": in_size,
+    }
+    if wallclock_seconds is not None:
+        m["wallclock_seconds"] = float(wallclock_seconds)
+    if achieved_fps is not None:
+        m["achieved_fps"] = float(achieved_fps)
+    try:
+        v = get_video_stream_meta(in_probe) if in_probe else None
+    except Exception:
+        v = None
+    if v:
+        m["video_codec"] = v.get("codec")
+        m["video_width"] = v.get("width")
+        m["video_height"] = v.get("height")
+        m["video_bitrate"] = v.get("bitrate")
+        m["duration"] = v.get("duration")
+        m["source_bpp"] = v.get("bpp")
+        if v.get("fps"):
+            m["fps_source"] = v.get("fps")
+        # bpp of the *output* video stream: we don't know exactly how
+        # container overhead is split, but the dominant component is the
+        # video bitstream, so back-calculate from out_size / duration.
+        if v.get("width") and v.get("height") and v.get("fps") and v.get("duration"):
+            dur = float(v["duration"])
+            w = int(v["width"])
+            h = int(v["height"])
+            fps = float(v["fps"])
+            if dur > 0 and w > 0 and h > 0 and fps > 0 and out_size > 0:
+                # output_bpp is bits/pixel relative to the source resolution
+                # (a useful cross-resolution comparison metric).
+                m["output_bpp"] = (out_size * 8) / (w * h * fps * dur)
+    try:
+        a_meta = get_audio_streams_meta(in_probe) if in_probe else []
+    except Exception:
+        a_meta = []
+    if a_meta:
+        # Pick the default audio track; fall back to the first.
+        primary = next((a for a in a_meta if a.get("default")), a_meta[0])
+        m["audio_codec"] = primary.get("codec")
+        m["audio_channels"] = primary.get("channels")
+    return m
+
+
 def _transcode_attempt(path: str, temp_input: str, temp_output: str, ffmpeg_log: str, final_tmp: str, cfg: Config, state: StateDB, logger) -> bool:
     """Single transcode attempt. Returns True on success, raises on failure."""
     try:
@@ -183,6 +302,7 @@ def _transcode_attempt(path: str, temp_input: str, temp_output: str, ffmpeg_log:
 
         # Copy source to local temp
         logger.info(f"Copying {path} to temp...")
+        in_probe = probe_file(path)
         if cfg.verify_checksum:
             copy_with_verify(path, temp_input)
         else:
@@ -191,6 +311,7 @@ def _transcode_attempt(path: str, temp_input: str, temp_output: str, ffmpeg_log:
         # Build and run ffmpeg
         cmd = build_ffmpeg_command(temp_input, temp_output, cfg, probe_file(temp_input))
         logger.info(f"Transcoding: ffmpeg {' '.join(cmd[:12])} ...")
+        transcode_start = time.monotonic()
         with open(ffmpeg_log, "w") as stderr_fh:
             try:
                 subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=stderr_fh)
@@ -199,11 +320,14 @@ def _transcode_attempt(path: str, temp_input: str, temp_output: str, ffmpeg_log:
                 with open(ffmpeg_log, "r") as f:
                     stderr_text = f.read()
                 raise FfmpegError(f"ffmpeg failed: {stderr_text[-4000:]}")
+        transcode_wallclock = time.monotonic() - transcode_start
+        fps_samples = _parse_fps_samples(ffmpeg_log)
+        achieved_fps = _steady_state_fps(fps_samples)
 
-        # Verify output
+        # Verify output (reuse in_probe; saves an extra ffprobe on the input)
         if cfg.verify_output:
             logger.info("Verifying output...")
-            verify_output(temp_input, temp_output, cfg)
+            verify_output(temp_input, temp_output, cfg, in_probe=in_probe)
 
         # Check output is smaller (safety)
         out_size = os.path.getsize(temp_output)
@@ -225,11 +349,21 @@ def _transcode_attempt(path: str, temp_input: str, temp_output: str, ffmpeg_log:
             output_path = os.path.join(cfg.output_dir, rel)
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             safe_move(temp_output, output_path)
-            state.mark_completed(path, out_size)
-            logger.info(
-                f"Done: {path} -> {output_path} "
-                f"({in_size / 1024 / 1024:.1f} MB -> {out_size / 1024 / 1024:.1f} MB)"
+            metrics = _build_encode_metrics(
+                in_probe, out_size, in_size, cfg, transcode_wallclock, achieved_fps
             )
+            state.mark_completed(path, out_size, metrics=metrics)
+            if achieved_fps is not None:
+                logger.info(
+                    f"Done: {path} -> {output_path} "
+                    f"({in_size / 1024 / 1024:.1f} MB -> {out_size / 1024 / 1024:.1f} MB, "
+                    f"{achieved_fps:.1f} fps)"
+                )
+            else:
+                logger.info(
+                    f"Done: {path} -> {output_path} "
+                    f"({in_size / 1024 / 1024:.1f} MB -> {out_size / 1024 / 1024:.1f} MB)"
+                )
         else:
             shutil.copy2(temp_output, final_tmp)
             backup_path = path + cfg.backup_suffix
@@ -244,7 +378,7 @@ def _transcode_attempt(path: str, temp_input: str, temp_output: str, ffmpeg_log:
             if cfg.post_replace_verify:
                 logger.info("Verifying replaced file...")
                 try:
-                    verify_output(temp_input, path, cfg)
+                    verify_output(temp_input, path, cfg, in_probe=in_probe)
                 except Exception as e:
                     # Attempt rollback if backup exists
                     if cfg.keep_backup and os.path.exists(backup_path):
@@ -253,10 +387,19 @@ def _transcode_attempt(path: str, temp_input: str, temp_output: str, ffmpeg_log:
                         raise SafetyError(f"Post-replace verification failed, rolled back: {e}")
                     raise SafetyError(f"Post-replace verification failed (no backup): {e}")
 
-            state.mark_completed(path, out_size)
-            logger.info(
-                f"Done: {path} ({in_size / 1024 / 1024:.1f} MB -> {out_size / 1024 / 1024:.1f} MB)"
+            metrics = _build_encode_metrics(
+                in_probe, out_size, in_size, cfg, transcode_wallclock, achieved_fps
             )
+            state.mark_completed(path, out_size, metrics=metrics)
+            if achieved_fps is not None:
+                logger.info(
+                    f"Done: {path} ({in_size / 1024 / 1024:.1f} MB -> {out_size / 1024 / 1024:.1f} MB, "
+                    f"{achieved_fps:.1f} fps)"
+                )
+            else:
+                logger.info(
+                    f"Done: {path} ({in_size / 1024 / 1024:.1f} MB -> {out_size / 1024 / 1024:.1f} MB)"
+                )
         return True
     finally:
         for p in (temp_input, temp_output, ffmpeg_log, final_tmp):
@@ -283,9 +426,10 @@ def transcode_file(path: str, cfg: Config, state: StateDB, logger) -> bool:
 
     file_size = os.path.getsize(path)
 
-    # Check temp space (source copy + temp output before move)
+    # Check temp space (peak is ~1× file size; 1.5× gives safety margin for
+    # partial writes, mkvmerge scratch, and verification copies).
     free_gb = get_free_space_gb(cfg.temp_dir)
-    needed_gb = (file_size * 2) / (1024 ** 3)
+    needed_gb = (file_size * 1.5) / (1024 ** 3)
     if free_gb < needed_gb:
         logger.error(
             f"Only {free_gb:.1f} GB free in temp dir, need ~{needed_gb:.1f} GB for {path}"

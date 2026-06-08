@@ -1,10 +1,12 @@
 """Command-line interface for plex_compress."""
 
 import argparse
+import dataclasses
 import fnmatch
 import os
 import signal
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Optional
 
 from .config import Config
@@ -22,6 +24,93 @@ def _signal_handler(signum, frame):
     global _running
     _running = False
     print("\nInterrupted. Finishing current file and exiting...")
+
+
+def _process_one_worker(path: str, cfg_dict: dict) -> tuple:
+    """Worker function (module-level so it's picklable for ProcessPoolExecutor).
+
+    Reconstructs Config + StateDB + logger in the worker process. Returns
+    (path, ok, error_message). Never raises — exceptions are caught and
+    returned as error strings so the main process can log them.
+    """
+    import logging
+    from .config import Config as _Config
+    from .state import StateDB as _StateDB
+    from .transcoder import transcode_file as _transcode_file
+    from .utils import setup_logging as _setup_logging
+
+    cfg = _Config(**cfg_dict)
+    logger = _setup_logging(verbose=cfg.verbose, log_path=cfg.log_path)
+    state = _StateDB(cfg.state_db_path)
+    try:
+        ok = _transcode_file(path, cfg, state, logger)
+        return (path, ok, None)
+    except Exception as e:
+        return (path, False, f"{type(e).__name__}: {e}")
+
+
+def _process_batch(candidates: list, cfg: Config, logger) -> tuple:
+    """Process candidates serially or in parallel based on cfg.parallel_jobs.
+
+    Returns (success, failed, skipped) counts.
+    """
+    global _running
+    success = failed = skipped = 0
+
+    if cfg.parallel_jobs <= 1:
+        # Sequential path (preserves the original behavior for single-job users)
+        for path in candidates:
+            if not _running:
+                logger.info("Stopping gracefully.")
+                break
+            ok = transcode_file(path, cfg, _state_for_main(cfg, logger), logger)
+            if ok:
+                success += 1
+            else:
+                failed += 1
+        return success, failed, skipped
+
+    # Parallel path: ProcessPoolExecutor
+    cfg_dict = dataclasses.asdict(cfg)
+    # logger isn't picklable; remove it (workers create their own)
+    cfg_dict.pop("log_path", None)
+    # also drop the logger itself if it got serialized in somehow
+    cfg_dict = {k: v for k, v in cfg_dict.items() if k != "logger"}
+
+    logger.info(f"Dispatching {len(candidates)} files to {cfg.parallel_jobs} parallel workers")
+    with ProcessPoolExecutor(max_workers=cfg.parallel_jobs) as ex:
+        futures = {ex.submit(_process_one_worker, p, cfg_dict): p for p in candidates}
+        try:
+            for fut in as_completed(futures):
+                if not _running:
+                    logger.info("Interrupt received; cancelling pending work...")
+                    for f in futures:
+                        f.cancel()
+                    break
+                path = futures[fut]
+                try:
+                    _p, ok, err = fut.result()
+                    if ok:
+                        success += 1
+                    else:
+                        failed += 1
+                        if err:
+                            logger.error(f"Failed: {path}: {err}")
+                except Exception as e:
+                    failed += 1
+                    logger.error(f"Worker exception for {path}: {e}")
+        except KeyboardInterrupt:
+            logger.info("KeyboardInterrupt; cancelling pending work...")
+            for f in futures:
+                f.cancel()
+            raise
+    return success, failed, skipped
+
+
+def _state_for_main(cfg: Config, logger) -> StateDB:
+    """Helper: a single StateDB for the main process (used in sequential mode
+    and for pre-existing status checks before dispatching to workers)."""
+    return StateDB(cfg.state_db_path)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,6 +139,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", "-o", default=None, help="Write outputs to this directory instead of replacing originals in-place")
     parser.add_argument("--force", action="store_true", help="Re-process files already marked as completed in state DB")
     parser.add_argument("--health-check", action="store_true", help="Run pre-flight health check and exit")
+    parser.add_argument("--calibrate", action="store_true", help="Run a short encoder calibration transcode to measure achieved fps, then exit")
+    parser.add_argument("--calibrate-sample", default=None, help="Path to a sample video file to use for calibration (default: synthetic testsrc)")
+    parser.add_argument("--calibrate-duration", type=float, default=5.0, help="Calibration sample duration in seconds (default: 5)")
     parser.add_argument("--min-file-age", type=float, default=None, help="Skip files modified within last N seconds (default: 300)")
     parser.add_argument("--no-file-locking", action="store_true", help="Disable file locking (allows concurrent processing of same file)")
     parser.add_argument("--no-post-replace-verify", action="store_true", help="Skip post-replace verification of final file")
@@ -98,6 +190,27 @@ def main(argv: Optional[list] = None) -> int:
         from .health import run_health_check
         ok, _messages = run_health_check(cfg, logger)
         return 0 if ok else 1
+
+    # Calibration mode: run a short transcode to measure achieved fps
+    # and cache it for future time-estimation runs.
+    if args.calibrate:
+        from .calibrate import calibrate_encoder
+        try:
+            result = calibrate_encoder(
+                cfg,
+                sample_path=args.calibrate_sample,
+                logger=logger,
+                duration_s=args.calibrate_duration,
+            )
+        except Exception as e:
+            logger.error(f"Calibration failed: {e}")
+            return 1
+        logger.info(
+            f"Calibration complete: {result['achieved_fps_steady']:.1f} fps steady "
+            f"@ {result['width']}x{result['height']} (encoder={result['encoder']}, "
+            f"quality={result['quality']}, preset={result['preset']})"
+        )
+        return 0
 
     state = StateDB(cfg.state_db_path)
 
@@ -168,6 +281,28 @@ def main(argv: Optional[list] = None) -> int:
     if 'probed' in report:
         logger.info(f"Probed this scan: {report['probed']} (cached: {report.get('cached', 0)})")
     logger.info(f"Estimated savings: {report['estimated_savings_gb']:.1f} GB")
+    if 'estimated_output_gb' in report:
+        logger.info(f"Estimated output size: {report['estimated_output_gb']:.1f} GB")
+    if 'estimated_transcode_hours' in report:
+        logger.info(
+            f"Estimated transcode time: {report['estimated_transcode_hours']:.1f} hours "
+            f"@ {report.get('transcode_fps_basis', 'unknown fps')}"
+        )
+    if 'estimated_savings_by_codec' in report and report['estimated_savings_by_codec']:
+        codec_lines = ", ".join(
+            f"{codec}={gb:.1f}GB"
+            for codec, gb in sorted(report['estimated_savings_by_codec'].items(), key=lambda x: -x[1])
+        )
+        logger.info(f"Estimated savings by source codec: {codec_lines}")
+    # Surface prediction accuracy from previously completed encodes.
+    acc = state.get_prediction_accuracy() if state is not None else None
+    if acc and acc.get("samples", 0) >= 1:
+        logger.info(
+            f"Prediction accuracy (from {acc['samples']} prior encodes): "
+            f"predicted={acc['predicted_savings_bytes'] / 1024**3:.2f} GB, "
+            f"actual={acc['actual_savings_bytes'] / 1024**3:.2f} GB "
+            f"({acc['relative_error_pct']:+.1f}% error)"
+        )
 
     if cfg.dry_run:
         # Print first 20 candidates
@@ -187,23 +322,21 @@ def main(argv: Optional[list] = None) -> int:
     failed = 0
     skipped = 0
 
-    for path in candidates:
-        if not _running:
-            logger.info("Stopping gracefully.")
-            break
+    # Pre-filter: drop already-completed (unless --force) and report the count.
+    if not cfg.force:
+        to_process = []
+        for p in candidates:
+            if state.get_status(p) == "completed":
+                logger.info(f"Skipping already completed: {p}")
+                skipped += 1
+            else:
+                to_process.append(p)
+        candidates = to_process
 
-        existing_status = state.get_status(path)
-        if existing_status == "completed" and not cfg.force:
-            logger.info(f"Skipping already completed: {path}")
-            skipped += 1
-            continue
-
-        state.mark_started(path)
-        ok = transcode_file(path, cfg, state, logger)
-        if ok:
-            success += 1
-        else:
-            failed += 1
+    if not candidates:
+        logger.info("No candidates to process.")
+    else:
+        success, failed, _ = _process_batch(candidates, cfg, logger)
 
     stats = state.get_stats()
     logger.info(

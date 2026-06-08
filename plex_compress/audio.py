@@ -5,13 +5,19 @@ from . import FilterError
 
 
 def build_audio_filter(cfg: Config) -> str:
-    """Build ffmpeg audio filter string for downmix + normalization."""
+    """Build ffmpeg audio filter string for downmix + normalization.
+
+    Order matters: downmix FIRST, then loudnorm. The reverse order (loudnorm
+    on 6 channels, then downmix) wastes CPU on ebur128 analysis of channels
+    that get discarded, and can produce measurably different gain values
+    since EBU R128 weights channels differently.
+    """
     filters = []
 
     if cfg.use_rfc7845_downmix:
         # RFC 7845 Opus downmix coefficients including LFE
         # This is layout-specific and only handles standard 5.1(side)
-        # For robustness, we prefer the built-in -ac 2 in default mode
+        # For robustness, we prefer the built-in aformat downmix in default mode
         pan = (
             "pan=stereo|"
             "FL=0.374107*FC+0.529067*FL+0.458186*BL+0.264534*BR+0.374107*LFE|"
@@ -19,10 +25,11 @@ def build_audio_filter(cfg: Config) -> str:
         )
         filters.append(pan)
     else:
-        # Built-in ATSC downmix is invoked via -ac 2, not a filter
-        pass
+        # Use ffmpeg's aformat downmix (faster than running loudnorm on 6
+        # channels and downmixing after). Layout-agnostic.
+        filters.append("aformat=channel_layouts=stereo")
 
-    # EBU R128 loudnorm
+    # EBU R128 loudnorm on the (now-stereo) signal
     loudnorm = f"loudnorm=I={cfg.loudnorm_i}:TP={cfg.loudnorm_tp}:LRA={cfg.loudnorm_lra}"
     filters.append(loudnorm)
 
