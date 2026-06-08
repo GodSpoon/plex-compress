@@ -21,18 +21,46 @@ def compute_scan_sig(path: str) -> Optional[str]:
         return None
 
 
-SCHEMA = """
+# Add-on columns for the encode-metrics / prediction-accuracy tracker.
+# All columns are nullable so existing rows are unaffected; the migration
+# adds them on first connection to a pre-existing database.
+_METRICS_COLUMNS = [
+    ("video_codec", "TEXT"),
+    ("video_width", "INTEGER"),
+    ("video_height", "INTEGER"),
+    ("video_bitrate", "INTEGER"),
+    ("audio_codec", "TEXT"),
+    ("audio_channels", "INTEGER"),
+    ("duration", "REAL"),
+    ("source_bpp", "REAL"),
+    ("output_bpp", "REAL"),
+    ("achieved_fps", "REAL"),
+    ("predicted_savings_bytes", "INTEGER"),
+    ("actual_savings_bytes", "INTEGER"),
+    ("encoder", "TEXT"),
+    ("encoder_quality", "INTEGER"),
+    ("encoder_preset", "TEXT"),
+    ("calibration_id", "TEXT"),
+]
+
+# Build a CREATE TABLE statement that includes both the legacy columns and
+# the new metrics columns, so fresh databases get them in the base schema.
+_files_columns = [
+    "id INTEGER PRIMARY KEY AUTOINCREMENT",
+    "path TEXT UNIQUE NOT NULL",
+    "status TEXT NOT NULL DEFAULT 'pending'",
+    "original_size INTEGER",
+    "output_size INTEGER",
+    "reason TEXT",
+    "started_at TEXT",
+    "completed_at TEXT",
+    "error_count INTEGER DEFAULT 0",
+    "scan_sig TEXT",
+] + [f"{name} {ddl}" for name, ddl in _METRICS_COLUMNS]
+
+SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS files (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    path TEXT UNIQUE NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    original_size INTEGER,
-    output_size INTEGER,
-    reason TEXT,
-    started_at TEXT,
-    completed_at TEXT,
-    error_count INTEGER DEFAULT 0,
-    scan_sig TEXT
+    {', '.join(_files_columns)}
 );
 
 CREATE INDEX IF NOT EXISTS idx_status ON files(status);
@@ -44,6 +72,25 @@ CREATE TABLE IF NOT EXISTS sessions (
     ended_at TEXT,
     name TEXT
 );
+
+CREATE TABLE IF NOT EXISTS encode_metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    path TEXT NOT NULL,
+    encoder TEXT,
+    encoder_quality INTEGER,
+    encoder_preset TEXT,
+    width INTEGER,
+    height INTEGER,
+    fps_source REAL,
+    achieved_fps REAL,
+    wallclock_seconds REAL,
+    source_bpp REAL,
+    output_bpp REAL,
+    input_bytes INTEGER,
+    output_bytes INTEGER,
+    recorded_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_encode_metrics_path ON encode_metrics(path);
 """
 
 
@@ -64,6 +111,10 @@ class StateDB:
             cols = [r[1] for r in conn.execute("PRAGMA table_info(files)").fetchall()]
             if "scan_sig" not in cols:
                 conn.execute("ALTER TABLE files ADD COLUMN scan_sig TEXT")
+            # Migration: encode-metrics columns for the prediction-accuracy tracker.
+            for col, ddl in _METRICS_COLUMNS:
+                if col not in cols:
+                    conn.execute(f"ALTER TABLE files ADD COLUMN {col} {ddl}")
             conn.commit()
     def reset_in_progress(self):
         """Reset any in-progress entries to pending (useful after a crash)."""
@@ -147,17 +198,138 @@ class StateDB:
     def mark_started(self, path: str, original_size: Optional[int] = None):
         self.upsert(path, "in_progress", original_size=original_size)
 
-    def mark_completed(self, path: str, output_size: int):
+    def mark_completed(self, path: str, output_size: int, metrics: Optional[Dict[str, Any]] = None):
+        """Mark a file as successfully transcoded.
+
+        ``metrics`` is an optional dict; any of the following keys are
+        persisted to the matching column (other keys are silently ignored):
+            video_codec, video_width, video_height, video_bitrate,
+            audio_codec, audio_channels, duration,
+            source_bpp, output_bpp, achieved_fps,
+            predicted_savings_bytes, actual_savings_bytes,
+            encoder, encoder_quality, encoder_preset, calibration_id.
+        Also records a row in the ``encode_metrics`` table for the
+        prediction-accuracy tracker.
+        Never raises on metrics errors; logging is best-effort.
+        """
         # Store the signature of the *new* (transcoded) file so future scans
         # recognise it as unchanged and skip re-probing it.
         sig = compute_scan_sig(path)
+        m = metrics or {}
         with sqlite3.connect(self.db_path) as conn:
+            set_clauses = [
+                "status='completed'",
+                "output_size=?",
+                "completed_at=?",
+                "scan_sig=?",
+            ]
+            params: list = [output_size, self._now(), sig]
+            for col, _ddl in _METRICS_COLUMNS:
+                if col in m:
+                    set_clauses.append(f"{col}=?")
+                    params.append(m[col])
+            params.append(path)
             conn.execute(
-                """UPDATE files SET status='completed', output_size=?, completed_at=?, scan_sig=?
-                   WHERE path=?""",
-                (output_size, self._now(), sig, path)
+                f"UPDATE files SET {', '.join(set_clauses)} WHERE path=?",
+                params,
             )
             conn.commit()
+        # Best-effort side table for analytics (do not block on failure).
+        if m:
+            try:
+                self.record_encode_metrics(path, m)
+            except Exception:
+                pass
+
+    def record_encode_metrics(self, path: str, metrics: Dict[str, Any]) -> None:
+        """Append a row to encode_metrics for the prediction-accuracy tracker.
+
+        Mirrors the columns already stored on the files row. Never raises.
+        """
+        m = metrics or {}
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """INSERT INTO encode_metrics
+                   (path, encoder, encoder_quality, encoder_preset,
+                    width, height, fps_source, achieved_fps,
+                    wallclock_seconds, source_bpp, output_bpp,
+                    input_bytes, output_bytes, recorded_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    path,
+                    m.get("encoder"),
+                    m.get("encoder_quality"),
+                    m.get("encoder_preset"),
+                    m.get("video_width"),
+                    m.get("video_height"),
+                    m.get("fps_source"),
+                    m.get("achieved_fps"),
+                    m.get("wallclock_seconds"),
+                    m.get("source_bpp"),
+                    m.get("output_bpp"),
+                    m.get("input_bytes"),
+                    m.get("output_bytes"),
+                    self._now(),
+                ),
+            )
+            conn.commit()
+
+    def get_prediction_accuracy(self) -> Optional[Dict[str, Any]]:
+        """Compare predicted vs. actual savings across all completed files.
+
+        Returns a dict with prediction accuracy stats, or None if there are
+        no rows with both predicted and actual values recorded.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                """SELECT COUNT(*),
+                          COALESCE(SUM(predicted_savings_bytes), 0),
+                          COALESCE(SUM(actual_savings_bytes), 0),
+                          COALESCE(SUM(output_size), 0),
+                          COALESCE(SUM(original_size), 0)
+                   FROM files
+                   WHERE status='completed'
+                     AND predicted_savings_bytes IS NOT NULL
+                     AND actual_savings_bytes IS NOT NULL"""
+            ).fetchone()
+        if not row or row[0] == 0:
+            return None
+        count, pred_savings, act_savings, total_out, total_in = row
+        pred_savings = pred_savings or 0
+        act_savings = act_savings or 0
+        total_in = total_in or 0
+        total_out = total_out or 0
+        abs_err = abs(pred_savings - act_savings)
+        rel_err = (abs_err / max(1, abs(pred_savings))) * 100.0
+        return {
+            "samples": int(count),
+            "predicted_savings_bytes": int(pred_savings),
+            "actual_savings_bytes": int(act_savings),
+            "absolute_error_bytes": int(abs_err),
+            "relative_error_pct": round(rel_err, 2),
+            "actual_savings_pct": round((act_savings / total_in) * 100.0, 2) if total_in else 0.0,
+        }
+
+    def get_bpp_table(self) -> Dict[int, float]:
+        """Return median output_bpp per width tier, computed from real encodes.
+
+        Used by the scanner to refine its predictions after we have enough
+        ground truth. Returns an empty dict if no data is available.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute(
+                """SELECT video_width, output_bpp FROM files
+                   WHERE status='completed' AND output_bpp IS NOT NULL
+                     AND video_width IS NOT NULL AND output_bpp > 0"""
+            ).fetchall()
+        if not rows:
+            return {}
+        by_width: Dict[int, List[float]] = {}
+        for w, b in rows:
+            by_width.setdefault(int(w), []).append(float(b))
+        # Use median per tier; safer than mean against outliers.
+        import statistics
+        return {w: round(statistics.median(bs), 6) for w, bs in by_width.items()}
 
     def mark_failed(self, path: str, reason: str):
         with sqlite3.connect(self.db_path) as conn:

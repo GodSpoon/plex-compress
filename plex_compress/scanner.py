@@ -10,6 +10,8 @@ from .probe import (
     get_default_audio_stream,
     get_duration,
     get_file_size,
+    get_video_stream_meta,
+    get_audio_streams_meta,
 )
 from . import (
     AlreadyOptimalError,
@@ -20,6 +22,167 @@ from . import (
 
 
 VIDEO_EXTENSIONS = {".mkv", ".mp4", ".avi", ".m4v", ".mov", ".wmv", ".ts"}
+
+
+# Codec efficiency ratios: how many bits each codec needs to reach the same
+# perceptual quality as H.264 at the same scene. Lower = more efficient.
+# Derived from Netflix per-title encoding research and the x265 quality
+# tables; values rounded for estimation purposes.
+CODEC_EFFICIENCY = {
+    "mpeg2video": 5.0, "mpeg1video": 5.0,
+    "h264": 1.0, "h263": 1.2,
+    "hevc": 0.5, "h265": 0.5,
+    "av1": 0.4, "vp9": 0.55,
+    "wmv2": 1.5, "vc1": 1.3,
+}
+
+# Target codec (always HEVC for this tool) efficiency at the *baseline* CRF
+# of 28. Used to translate source-bpp into target-bpp via
+# `target_bpp = src_bpp * TARGET_EFFICIENCY / source_eff * quality_factor`.
+TARGET_EFFICIENCY = 0.5
+
+# Default video metadata when we have only file size (cached pending).
+# 1080p / 30 fps is the dominant tier for a typical Plex TV library.
+_DEFAULT_WIDTH = 1920
+_DEFAULT_HEIGHT = 1080
+_DEFAULT_FPS = 30.0
+
+
+def parse_bitrate(s: str) -> int:
+    """Parse '160k' -> 160000, '1.5M' -> 1500000, '1000' -> 1000.
+
+    Returns 0 for unrecognized input; never raises.
+    """
+    if s is None:
+        return 0
+    text = str(s).strip()
+    if not text:
+        return 0
+    suffix = text[-1].lower()
+    mult = 1
+    body = text
+    if suffix in ("k", "m", "g"):
+        body = text[:-1].strip()
+        mult = {"k": 1000, "m": 1000 ** 2, "g": 1000 ** 3}[suffix]
+    try:
+        return int(float(body) * mult)
+    except (ValueError, TypeError):
+        return 0
+
+
+def predict_output_video_bytes(
+    probe: Optional[Dict[str, Any]],
+    cfg: Config,
+    file_size_fallback: int = 0,
+    bpp_table: Optional[Dict[int, float]] = None,
+) -> int:
+    """Predict the size in bytes of the *video* stream after transcoding.
+
+    Uses the bpp model: target_bpp = source_bpp * codec_efficiency * quality_factor.
+    If a calibrated bpp_table is provided (from real encodes), it overrides the
+    estimate for the matching source width. Falls back to a 60% of original
+    file size estimate when probe data is insufficient.
+    """
+    if not probe:
+        return int(file_size_fallback * 0.60) if file_size_fallback else 0
+    v = get_video_stream_meta(probe)
+    width = v["width"]
+    height = v["height"]
+    fps = v["fps"]
+    bitrate = v["bitrate"]
+    duration = v["duration"] or get_duration(probe)
+    if not (width and height and fps and duration and bitrate):
+        return int(file_size_fallback * 0.60) if file_size_fallback else 0
+    if width <= 0 or height <= 0 or fps <= 0 or duration <= 0 or bitrate <= 0:
+        return int(file_size_fallback * 0.60) if file_size_fallback else 0
+    src_bpp = bitrate / (width * height * fps)
+    codec = (v["codec"] or "").lower() if v["codec"] else ""
+    source_eff = CODEC_EFFICIENCY.get(codec, 1.0)
+    # Quality adjustment: linear in log-space; +1 CRF ~ -10% bpp. CRF 28 baseline.
+    quality_factor = 10 ** ((28 - int(cfg.video_quality)) / 10.0)
+    # Source bpp -> target HEVC bpp: divide by source efficiency, multiply by
+    # the target's baseline efficiency, then scale by the user's quality knob.
+    target_bpp = src_bpp * (TARGET_EFFICIENCY / source_eff) * quality_factor
+
+    if bpp_table and width in bpp_table:
+        target_bpp = bpp_table[width]
+
+    out_bits = target_bpp * width * height * fps * duration
+    return int(out_bits / 8)
+
+
+def predict_output_audio_bytes(probe: Optional[Dict[str, Any]], cfg: Config) -> int:
+    """Predict the size in bytes of all audio streams after transcoding.
+
+    The first/default audio track is re-encoded to cfg.audio_bitrate at
+    cfg.audio_channels; other tracks are copied at their source bitrate.
+    Returns 0 if probe or duration is missing.
+    """
+    if not probe:
+        return 0
+    duration = get_duration(probe) or 0
+    if duration <= 0:
+        return 0
+    audios = get_audio_streams_meta(probe)
+    if not audios:
+        return 0
+    target_bitrate = parse_bitrate(cfg.audio_bitrate)
+    any_default = any(a["default"] for a in audios)
+    total_bits = 0
+    for i, a in enumerate(audios):
+        is_default = a["default"] or (i == 0 and not any_default)
+        if is_default:
+            bitrate = target_bitrate
+        else:
+            bitrate = a["bitrate"] or 0
+        if bitrate <= 0:
+            # Fall back to a conservative default for unspecified tracks.
+            bitrate = 160000 if is_default else 96000
+        total_bits += bitrate * duration
+    return int(total_bits / 8)
+
+
+def predict_savings(
+    probe: Optional[Dict[str, Any]],
+    file_size: int,
+    cfg: Config,
+    bpp_table: Optional[Dict[int, float]] = None,
+) -> Dict[str, int]:
+    """Predict per-file savings.
+
+    Returns {in_video, in_audio, out_video, out_audio, savings_bytes,
+    predicted_output_bytes}. in_video/in_audio/in_total are derived from
+    the probe (bitrate * duration) when possible, else fall back to
+    file_size with a 90/10 video/audio split.
+    """
+    duration = get_duration(probe) if probe else None
+    if probe and duration:
+        v_meta = get_video_stream_meta(probe)
+        a_meta = get_audio_streams_meta(probe)
+        in_video = int((v_meta["bitrate"] or 0) * duration / 8) if v_meta["bitrate"] else int(file_size * 0.90)
+        in_audio = sum(int((a["bitrate"] or 0) * duration / 8) for a in a_meta)
+        if in_audio == 0 and a_meta:
+            in_audio = int(file_size * 0.10 / max(1, len(a_meta)))
+        elif in_audio == 0:
+            in_audio = int(file_size * 0.10)
+    else:
+        in_video = int(file_size * 0.90)
+        in_audio = int(file_size * 0.10)
+
+    out_video = predict_output_video_bytes(probe, cfg, file_size, bpp_table)
+    out_audio = predict_output_audio_bytes(probe, cfg)
+    predicted_output = out_video + out_audio
+    in_total = in_video + in_audio
+    savings = max(0, in_total - predicted_output)
+    return {
+        "in_video": in_video,
+        "in_audio": in_audio,
+        "out_video": out_video,
+        "out_audio": out_audio,
+        "in_total": in_total,
+        "predicted_output_bytes": predicted_output,
+        "savings_bytes": savings,
+    }
 
 
 def find_video_files(root: str, exclusions: Optional[List[str]] = None) -> List[str]:
@@ -146,6 +309,7 @@ def scan_library(cfg: Config, state=None, force: bool = False, full_scan: bool =
     """
     import logging
     from .state import compute_scan_sig
+    from .calibrate import get_cached_calibration, get_default_fps, predict_transcode_time
 
     logger = logger or logging.getLogger("plex_compress")
     files_with_sig = find_video_files_with_sig(cfg.library_path, cfg.exclusions)
@@ -155,8 +319,24 @@ def scan_library(cfg: Config, state=None, force: bool = False, full_scan: bool =
     errors: List[Tuple[str, str]] = []
     already_optimal = 0
     total_original_size = 0
+    total_predicted_savings_bytes = 0
+    total_predicted_output_bytes = 0
+    estimated_transcode_seconds = 0.0
+    savings_by_codec: Dict[str, int] = {}
     probed = 0
     cached = 0
+
+    # Try to load a real calibration for the configured encoder. If none,
+    # fall back to encoder-specific default fps assumptions.
+    cal = get_cached_calibration(cfg, _DEFAULT_WIDTH, _DEFAULT_HEIGHT)
+    cal_achieved_fps = float((cal or {}).get("achieved_fps_steady") or 0.0)
+    if cal_achieved_fps <= 0:
+        cal_achieved_fps = get_default_fps(cfg.video_encoder)
+        cal = None  # ensure predict_transcode_time uses default path
+    cal_label = (
+        f"{cal_achieved_fps:.1f} fps (calibrated)" if cal
+        else f"{cal_achieved_fps:.1f} fps (default for {cfg.video_encoder})"
+    )
 
     mode = "full" if full_scan else "incremental"
     logger.info(f"Found {total} video files; resolving candidates ({mode} scan)...")
@@ -192,8 +372,28 @@ def scan_library(cfg: Config, state=None, force: bool = False, full_scan: bool =
                     state.set_scan_sig(path, sig)  # backfill legacy rows
                 if status == "pending":
                     candidates.append(path)
-                    if record.get("original_size"):
-                        total_original_size += record["original_size"]
+                    orig_size = record.get("original_size") or 0
+                    if orig_size:
+                        total_original_size += orig_size
+                        # For cached pending, assume 1080p h264 for codec,
+                        # and a default 30fps for time estimation. The
+                        # savings ratio is the only thing we can guess at
+                        # without re-probing.
+                        default_pred = predict_savings(None, orig_size, cfg)
+                        total_predicted_savings_bytes += default_pred["savings_bytes"]
+                        total_predicted_output_bytes += default_pred["predicted_output_bytes"]
+                        savings_by_codec["h264"] = savings_by_codec.get("h264", 0) + default_pred["savings_bytes"]
+                        # Time: assume 30fps source. We can't know resolution
+                        # from size alone, so use the calibration's resolution.
+                        est_seconds = predict_transcode_time(
+                            orig_size / 6_000_000,  # rough: ~6 Mbps per byte/s
+                            _DEFAULT_FPS,
+                            _DEFAULT_WIDTH,
+                            _DEFAULT_HEIGHT,
+                            {"width": _DEFAULT_WIDTH, "height": _DEFAULT_HEIGHT,
+                             "achieved_fps_steady": cal_achieved_fps},
+                        )
+                        estimated_transcode_seconds += est_seconds
                 else:
                     skipped.append((path, reason or "skipped (cached)"))
                     if "already_optimal" in reason:
@@ -211,6 +411,23 @@ def scan_library(cfg: Config, state=None, force: bool = False, full_scan: bool =
             size = get_file_size(probe) if probe else None
             if size:
                 total_original_size += size
+                pred = predict_savings(probe, size, cfg)
+                total_predicted_savings_bytes += pred["savings_bytes"]
+                total_predicted_output_bytes += pred["predicted_output_bytes"]
+                v_meta = get_video_stream_meta(probe) if probe else None
+                codec = (v_meta["codec"] if v_meta else None) or "unknown"
+                savings_by_codec[codec] = savings_by_codec.get(codec, 0) + pred["savings_bytes"]
+                if v_meta and v_meta["duration"] and v_meta["fps"] and v_meta["width"] and v_meta["height"]:
+                    est_seconds = predict_transcode_time(
+                        v_meta["duration"],
+                        v_meta["fps"],
+                        v_meta["width"],
+                        v_meta["height"],
+                        {"width": (cal or {}).get("width", _DEFAULT_WIDTH),
+                         "height": (cal or {}).get("height", _DEFAULT_HEIGHT),
+                         "achieved_fps_steady": cal_achieved_fps},
+                    )
+                    estimated_transcode_seconds += est_seconds
             if state is not None:
                 state.record_scan(path, "pending", original_size=size, scan_sig=sig)
         elif reason.startswith("probe_error"):
@@ -232,8 +449,10 @@ def scan_library(cfg: Config, state=None, force: bool = False, full_scan: bool =
         if progress_cb:
             progress_cb(i + 1, total, probed, cached)
 
-    # Rough estimate: HEVC saves ~35-45% for H.264 sources
-    estimated_savings_gb = (total_original_size * 0.40) / (1024 ** 3)
+    estimated_savings_gb = total_predicted_savings_bytes / (1024 ** 3)
+    estimated_output_gb = total_predicted_output_bytes / (1024 ** 3)
+    estimated_transcode_hours = estimated_transcode_seconds / 3600.0
+    savings_by_codec_gb = {k: round(v / (1024 ** 3), 3) for k, v in savings_by_codec.items()}
 
     logger.info(
         f"Scan complete ({mode}): {total} files, {probed} probed, {cached} cached, "
@@ -246,7 +465,11 @@ def scan_library(cfg: Config, state=None, force: bool = False, full_scan: bool =
         "skipped": skipped,
         "errors": errors,
         "already_optimal": already_optimal,
-        "estimated_savings_gb": estimated_savings_gb,
+        "estimated_savings_gb": round(estimated_savings_gb, 3),
+        "estimated_output_gb": round(estimated_output_gb, 3),
+        "estimated_savings_by_codec": savings_by_codec_gb,
+        "estimated_transcode_hours": round(estimated_transcode_hours, 2),
+        "transcode_fps_basis": cal_label,
         "probed": probed,
         "cached": cached,
         "full_scan": full_scan,
