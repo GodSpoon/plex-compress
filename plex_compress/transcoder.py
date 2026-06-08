@@ -10,9 +10,9 @@ from typing import Optional
 
 from .config import Config
 from .probe import (
-    probe_file, get_video_stream, get_audio_streams, get_subtitle_streams,
-    get_duration, get_file_size, get_attachment_streams, get_chapters,
-    get_video_stream_meta, get_audio_streams_meta,
+    probe_file, get_video_stream, get_audio_streams, get_default_audio_stream,
+    get_subtitle_streams, get_duration, get_file_size, get_attachment_streams,
+    get_chapters, get_video_stream_meta, get_audio_streams_meta,
 )
 from .audio import build_audio_encoder_args, build_audio_filter
 
@@ -126,16 +126,19 @@ def verify_output(input_path: str, output_path: str, cfg: Config, in_probe: Opti
             f"Expected video codec {expected_video}, got {out_video.get('codec_name')}"
         )
 
-    # Check audio channels
+    # Check audio channels (only the default track must be stereo;
+    # non-default tracks are copied as-is and may retain surround.)
     out_audio = get_audio_streams(out_probe)
     if out_audio:
-        for aud in out_audio:
-            channels = aud.get("channels", 0)
-            layout = aud.get("channel_layout", "")
-            if channels > 2 and "stereo" not in layout:
-                raise ChannelLayoutError(
-                    f"Audio has {channels} channels, layout={layout}"
-                )
+        default_aud = get_default_audio_stream(out_probe)
+        if default_aud is None:
+            default_aud = out_audio[0]
+        channels = default_aud.get("channels", 0)
+        layout = default_aud.get("channel_layout", "")
+        if channels > 2 and "stereo" not in layout:
+            raise ChannelLayoutError(
+                f"Default audio has {channels} channels, layout={layout}"
+            )
 
     # Check duration
     in_dur = get_duration(in_probe)
